@@ -586,17 +586,19 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T7 — Application mobile (PWA puis native)
 
-**Statut : v2.1 ✅ LIVRÉ et VALIDÉ le 10/08/2026** (cf. `walkthrough.md` §14). v2.2 (React Native) à venir.
+**Statut : ✅ LIVRÉ et VALIDÉ le 10/08/2026** — v2.1 (PWA, cf. `walkthrough.md` §14) et v2.2 (app native, cf. §16).
 
 **Objectif :** rendre le service utilisable sur mobile comme application installable, puis native.
 
 **Livrables :**
 - v2.1 : transformation du site en **PWA** (manifest, service worker, cache hors-ligne partiel).
-- v2.2 : app **React Native** (iOS + Android) réutilisant l'API T5 et les composants web.
+- v2.2 : app native (iOS + Android) via **Capacitor** — réutilise la SPA web (même codebase, API T5 appelée sur `https://ter.zvz.fr`), shell natif généré par `npx cap add android`, build APK en CI **GitHub Actions** (`.github/workflows/build-apk.yml`, modèle du repo pressscraper : `cap sync android` + `gradlew assembleDebug`, Java 21).
 
 **Critères d'acceptation (v2.1) :** installable sur mobile, recherche fonctionnelle hors-ligne (cache des résultats récents).
 **Validation v2.1 :** SPA transformée en PWA — `manifest.webmanifest` (display standalone, thème `#1a3a8f`, icônes 192/512 + maskable + apple-touch-icon 180), `sw.js` (precache du shell, cache API borné à 100 entrées : network-first pour `/v1/journeys`, stale-while-revalidate pour `/v1/health` + `/v1/stations/search` et les assets), inscription du SW dans `app.js`. Assets servis avec les bons MIME (`application/manifest+json`, `text/javascript`), 21 tests d'intégration toujours OK, vérifié en prod sur https://ter.zvz.fr.
-**Critères d'acceptation (v2.2) :** app publiée sur les stores, même parcours que le site.
+**Critères d'acceptation (v2.2) :** app publiée sur les stores, même parcours que le site. APK debug produit par la CI ✅ (artefact `ter-finder-debug-apk`, ~3,7 Mo).
+**Validation v2.2 :** repo GitHub `muarf/PlanTER` ; workflow `Build Android APK` vert sur `main` (push + dispatch). Le WebView détecte Capacitor (`window.Capacitor`) et bascule l'API sur `https://ter.zvz.fr` (`API_BASE` dans `web/app.js`). Publication stores : reste à signer (keystore) et à configurer les stores.
+**Note stack :** React Native (prévu initialement) remplacé par **Capacitor** : la SPA web existante est enveloppée telle quelle, un seul codebase à maintenir, workflow CI identique à `pressscraper`.
 
 **Dépendances :** T5.
 
@@ -620,11 +622,13 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T9 — Monétisation par affiliation (étude différée)
 
+**Statut : PoC ✅ (v1 liens Trainline) le 10/08/2026** — cf. `walkthrough.md` §17. Programme d'affiliation proprement dit : à étudier.
+
 **Objectif :** préparer la redirection d'achat vers un partenaire de billetterie, sans changer la gratuité ni la neutralité (§11).
 
 **Livrables (études + PoC) :**
 - Récupérer les conditions des programmes partenaires SNCF Connect / Trainline (commission, URLs de deep-link avec paramètres gare/date/heure).
-- PoC : bouton « Voir les horaires & acheter » sur la page détail, générant une URL d'affiliation.
+- PoC : bouton « Voir les horaires & acheter sur Trainline » sur la page détail, générant une URL pré-remplie. **Livré :** module `src/trainline.py` (cartographie `uic8` → code Trainline depuis le repo officiel `trainline-eu/stations-studio`/`stations.csv`, 4000 gares mappées) ; l'API expose `trainline_code` dans `/v1/stations/search` et un objet `booking.{provider,url}` par trajet (`/book/results?origin=…&destination=…&outbound_date=…&outbound_time=…`, premier/dernier leg ferroviaire, marches exclues) ; bouton affiché quand le mapping existe. Sans paramètre d'affiliation pour l'instant.
 - Ne jamais modifier l'ordre des résultats selon la commission.
 
 **Critères d'acceptation :** le lien d'affiliation est généré correctement ; le classement reste inchangé.

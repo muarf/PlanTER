@@ -612,7 +612,65 @@ node --check web/sw.js web/app.js                  # syntaxe OK
 
 Installable depuis mobile (Chrome/Android, Safari « Ajouter à l'écran d'accueil »). Prochaine sous-tâche T7 v2.2 : app React Native réutilisant l'API T5.
 
-## 15. Prochaines étapes (mise à jour)
+## 15. Exécution T7 v2.2 (app native Capacitor + CI) — 10/08/2026
+
+App Android native réutilisant la SPA web (même codebase), buildée en CI.
+
+### Décisions
+
+- **Capacitor** plutôt que React Native (initialement prévu au PLAN) : la SPA `web/` est enveloppée telle quelle dans un WebView natif. Un seul codebase, pas de duplication des écrans. Même pattern que le repo `muarf/pressscraper`.
+- Repo GitHub : **`muarf/PlanTER`** (créé vide précédemment), branché en `origin` du projet.
+- On ne compile pas localement : la CI (GitHub Actions) produit l'APK.
+
+### Fichiers ajoutés
+
+- `package.json` / `capacitor.config.json` (`appId fr.zvz.terfinder`, `appName TER Finder`, `webDir: web`).
+- `android/` : projet natif généré par `npx cap add android` (commité ; `assets/public` et `capacitor.config.json` régénérés par `npx cap sync`).
+- `.github/workflows/build-apk.yml` : checkout → node 22 (`npm install`) → `npx cap sync android` → JDK 21 (temurin, cache gradle) → `./gradlew assembleDebug` → upload artefact `ter-finder-debug-apk`.
+- `.gitignore`/`.gitattributes` (données, `.venv`, `node_modules`, build android exclus).
+
+### Adaptation de la SPA
+
+`web/app.js` : `API_BASE` — en WebView Capacitor (`window.Capacitor.isNativePlatform()`), les appels `/v1/*` pointent sur `https://ter.zvz.fr` ; sur le web servi par FastAPI ils restent à la même origine. Le service worker ne cache pas les appels cross-origin (comportement déjà géré).
+
+### Vérification
+
+- `npm install` + `npx cap add android` + `npx cap sync android` : OK sur big-arm.
+- CI : run `Build Android APK` **vert** (push + dispatch), artefact APK debug ~3,7 Mo téléchargeable.
+- Reste (hors périmètre serveur) : signature release (keystore), icônes/splash finalisées, publication Play/App Store, appId iOS éventuel.
+
+## 16. Exécution T9 (liens Trainline) — 10/08/2026
+
+PoC de monétisation : des liens de réservation Trainline pré-remplis, sans paramètre d'affiliation pour l'instant (le programme d'affiliation lui-même reste à étudier).
+
+### Découverte : format des liens et cartographie
+
+- L'URL « deep link » fonctionnelle est `https://www.thetrainline.com/book/results?origin={code}&destination={code}&outbound_date={YYYY-MM-DD}[&outbound_time={HH:MM}]` (les URL `trainline.com/search/{slug}-to-{slug}/on/…` renvoient 404). L'API de recherche est chargée côté client, pas de validation HTTP possible sans navigateur.
+- Cartographie UIC → code : le repo public **`trainline-eu/stations-studio`** publie `public/stations.csv` (id, slug, `uic8_sncf`, `sncf_id` FR…). Téléchargé puis réduit aux gares FR avec `sncf_id` (`config/trainline_stations.csv`, 4456 lignes, 4000 UIC uniques).
+
+### Implémentation
+
+- `src/trainline.py` : chargement CSV (cache), `code_for(stop_area_id)` (accepte `StopArea:OCE…` / `OCE…`), `booking_url(from, to, date, time)`.
+- `src/api.py` : `trainline_code` ajouté aux réponses `/v1/stations/search` ; objet `booking.{provider,url}` par trajet dans `/v1/journeys` (premier/dernier leg **non-marche**, ex. Paris → Besançon : `origin=FRPLY&destination=FRABG&outbound_date=2026-08-10&outbound_time=07:34`).
+- `web/app.js` + `web/styles.css` : bouton « Voir les horaires & acheter sur Trainline » sur l'écran détail (lien `_blank`, classe `.buy-link`), affiché uniquement quand `j.booking.url` existe.
+
+### Vérification
+
+```bash
+curl -s "https://ter.zvz.fr/v1/journeys?from=OCE87686006&to=OCE87718007&date=2026-08-10&time=07:00&count=1"
+# booking: {provider: trainline, url: https://www.thetrainline.com/book/results?origin=FRPLY&destination=FRABG&outbound_date=2026-08-10&outbound_time=07:34}
+.venv/bin/python -m unittest tests.test_api -v   # 21 tests OK
+```
+
+Gares non mappées (peu fréquentes) : `booking.url` vaut `null`, pas de bouton.
+
+## 17. Versionnement GitHub + état du dépôt — 10/08/2026
+
+- Le projet entier est maintenant dans le repo **`muarf/PlanTER`** (branch `main`, commit initial « TER Finder T1-T7 + T9 »).
+- `data/`, `.venv/`, `node_modules/`, build android sont gitignorés (régénérables).
+- Les données et l'API restent déployées sur `big-arm` ; le serveur de prod n'est pas géré par la CI (le workflow ne build que l'APK).
+
+## 18. Prochaines étapes (mise à jour)
 
 Phase 3 (T6 web) livrée et en ligne. Prochaine : **T7** (PWA puis mobile natif).
 Les déploiements web/API sont documentés en §13.
