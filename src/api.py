@@ -180,7 +180,7 @@ def stations_search(
                 "lat": g.stops[idx].lat,
                 "lon": g.stops[idx].lon,
                 "aliases": _stop_aliases(g, idx),
-                "trainline_code": trainline.code_for(g.stops[idx].id),
+                "trainline_slug": trainline.slug_for(g.stops[idx].id),
             }
             for idx, _ in hits
         ]
