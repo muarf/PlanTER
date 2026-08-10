@@ -1,0 +1,20 @@
+# Données téléchargées / générées (volumineuses, régénérables)
+data/
+reports/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / npm
+node_modules/
+
+# Android (Capacitor) — build outputs
+android/app/build/
+android/.gradle/
+android/build/
+android/local.properties
+android/.idea/
+*.iml

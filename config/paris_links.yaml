@@ -1,0 +1,14 @@
+# Arcs de marche/métro intra-Paris (optionnels). §5.3
+#
+# Format : "Gare A -> Gare B: minutes"
+# Les gares sont résolues par nom normalisé. Ces arcs permettent une
+# correspondance entre deux gares parisiennes distinctes.
+# Désactivation : ne pas passer --paris-links au build.
+
+Paris Gare de Lyon -> Paris Bercy: 10
+Paris Gare de Lyon -> Paris Austerlitz: 12
+Paris Bercy -> Paris Austerlitz: 12
+Paris Est -> Paris Gare du Nord: 8
+Paris Est -> Paris Gare de Lyon: 25
+Paris Gare du Nord -> Paris Gare de Lyon: 30
+Paris Saint-Lazare -> Paris Est: 15

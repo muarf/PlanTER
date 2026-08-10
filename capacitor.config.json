@@ -1,0 +1,12 @@
+{
+  "appId": "fr.zvz.terfinder",
+  "appName": "TER Finder",
+  "webDir": "web",
+  "backgroundColor": "#1a3a8f",
+  "ios": {
+    "contentInset": "automatic"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

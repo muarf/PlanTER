@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Recherche d'itinéraires 100% TER en France — uniquement des trains régionaux, pas de TGV.">
+  <title>TER Finder — trajets 100% TER</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#1a3a8f">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TER Finder">
+</head>
+<body>
+  <header class="site-header">
+    <h1>TER Finder</h1>
+    <p class="tagline">Uniquement des trajets en train régional (TER). Jamais de TGV.</p>
+  </header>
+
+  <main>
+    <section id="search" aria-labelledby="search-title">
+      <h2 id="search-title" class="visually-hidden">Rechercher un trajet TER</h2>
+      <form id="search-form" novalidate>
+        <div class="field">
+          <label for="from">De</label>
+          <input id="from" name="from" type="text" autocomplete="off" required
+                 placeholder="Gare ou ville (ex. Paris, Dijon)" aria-autocomplete="list"
+                 aria-describedby="from-hint">
+          <ul id="from-suggestions" class="suggestions" role="listbox" hidden></ul>
+        </div>
+        <div class="field">
+          <label for="to">À</label>
+          <input id="to" name="to" type="text" autocomplete="off" required
+                 placeholder="Gare ou ville (ex. Besançon Viotte)" aria-autocomplete="list"
+                 aria-describedby="to-hint">
+          <ul id="to-suggestions" class="suggestions" role="listbox" hidden></ul>
+        </div>
+        <div class="field">
+          <label for="date">Date</label>
+          <input id="date" name="date" type="date" required>
+        </div>
+        <div class="field">
+          <label for="time">Heure</label>
+          <input id="time" name="time" type="time" value="08:00" required>
+        </div>
+        <fieldset class="field fieldset">
+          <legend>Sens</legend>
+          <label class="radio"><input type="radio" name="datetime_represents" value="departure" checked> Départ</label>
+          <label class="radio"><input type="radio" name="datetime_represents" value="arrival"> Arrivée</label>
+        </fieldset>
+        <div class="field">
+          <label for="max_transfers">Correspondances max</label>
+          <select id="max_transfers" name="max_transfers">
+            <option value="3" selected>3</option>
+            <option value="2">2</option>
+            <option value="1">1</option>
+            <option value="0">0 (direct)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="checkbox"><input type="checkbox" name="vehicle" value="train_only"> Trains uniquement (sans cars TER)</label>
+        </div>
+        <button type="submit" id="search-button">Rechercher</button>
+      </form>
+      <p id="search-error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="results" aria-live="polite" hidden>
+      <h2 id="results-title">Résultats</h2>
+      <ol id="journeys" class="journeys"></ol>
+      <p id="no-results" class="info" hidden>Aucun trajet 100% TER trouvé pour ces critères.</p>
+    </section>
+
+    <section id="detail" hidden aria-labelledby="detail-title">
+      <button type="button" id="detail-back" class="back">← Retour aux résultats</button>
+      <h2 id="detail-title">Détail du trajet</h2>
+      <div id="detail-body"></div>
+      <p class="note">Ce trajet ne comporte que des TER.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Données : SNCF Open Data, licence <a href="https://data.sncf.com/conditions-d-utilisation" rel="noopener">ODbL</a>.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

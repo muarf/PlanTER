@@ -1,0 +1,26 @@
+# Temps de correspondance par gare (minutes). §5.3
+#
+# Clé = identifiant de StopArea :
+#   - un id complet "StopArea:OCE87713040", OU
+#   - un nom de gare (résolu par correspondance normalisée ; s'il est ambigu,
+#     un avertissement est émis et la valeur est ignorée).
+# "default" s'applique à toutes les autres gares.
+default: 5
+
+Dijon: 8
+Paris Gare de Lyon: 10
+Paris Bercy: 8
+Paris Est: 8
+Paris Gare du Nord: 8
+Paris Saint-Lazare: 10
+Paris Montparnasse Hall 1 - 2: 10
+Paris Austerlitz: 10
+Lyon Part Dieu: 7
+Lyon Perrache: 8
+Toulouse Matabiau: 8
+Marseille Saint-Charles: 10
+Bordeaux Saint-Jean: 8
+Lille Flandres: 8
+Strasbourg: 8
+Nantes: 8
+Rennes: 8
