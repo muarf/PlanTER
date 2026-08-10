@@ -213,22 +213,35 @@ def journeys(
 
     journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]
 
-    # T9 — lien Trainline par trajet (PoC monétisation). On prend le premier et
-    # le dernier leg ferroviaire (les marches inter-gares ne sont pas une gare d'achat).
+    # T9 — liens Trainline PAR BILLET (PoC monétisation). Les billets TER se
+    # vendent séparément par segment : une URL de réservation est générée pour
+    # chaque leg ferroviaire (train/car/tram), avec sa propre date et heure de
+    # départ (les legs peuvent passer minuit). Les marches inter-gares n'ont
+    # pas de billet.
+    def _iso(leg):
+        """(date, heure) d'un leg à partir de son `from.time` ISO."""
+        t = (leg.get("from") or {}).get("time") or ""
+        return t[:10], (t[11:16] or None)
+
     out = []
     for j in journeys:
         jd = _bare_journey(j.to_json(d))
-        rail = [leg for leg in jd["legs"] if leg["type"] != "walk"]
-        url = None
-        if rail:
-            dep_time = (rail[0]["from"]["time"] or "")[11:16]
+        bookable = 0
+        for leg in jd["legs"]:
+            leg["booking"] = None
+            if leg["type"] == "walk":
+                continue
+            leg_date, leg_time = _iso(leg)
+            if not leg_date:
+                continue
             url = trainline.booking_url(
-                rail[0]["from"]["stop_area_id"],
-                rail[-1]["to"]["stop_area_id"],
-                d.isoformat(),
-                dep_time or None,
+                leg["from"]["stop_area_id"], leg["to"]["stop_area_id"],
+                leg_date, leg_time,
             )
-        jd["booking"] = {"provider": "trainline", "url": url}
+            if url:
+                leg["booking"] = {"provider": "trainline", "url": url}
+                bookable += 1
+        jd["booking"] = {"provider": "trainline", "tickets": bookable}
         out.append(jd)
     return {"journeys": out}
 

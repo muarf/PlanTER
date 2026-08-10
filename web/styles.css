@@ -135,3 +135,17 @@ footer a { color: var(--ter-dark); }
   font-size: 0.85rem;
   padding: 0.35rem 0.75rem;
 }
+
+.ticket-chip {
+  display: inline-block;
+  margin: 0.25rem 0.4rem 0.25rem 0;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: #e6b800;
+  color: #1a1a1a;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.ticket-chip:hover { background: #d4a800; }
+.leg-info .ticket-chip { margin-top: 0.35rem; }

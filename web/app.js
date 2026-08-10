@@ -132,8 +132,10 @@ function renderJourneys(journeys) {
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
         · ${j.transfers} correspondance(s) · ${lines}${badges}
       </div>
-      ${j.booking && j.booking.url
-        ? `<a class="buy-link buy-link-small" href="${j.booking.url}" target="_blank" rel="noopener noreferrer">Acheter sur Trainline</a>`
+      ${j.booking && j.booking.tickets
+        ? `<div class="ticket-links">${j.legs.filter((l) => l.booking && l.booking.url)
+            .map((l) => `<a class="ticket-chip" href="${l.booking.url}" target="_blank" rel="noopener noreferrer">Billet ${l.line || "trajet"} · Trainline</a>`)
+            .join("")}</div>`
         : ""}`;
     btn.addEventListener("click", () => showDetail(j));
     li.appendChild(btn);
@@ -158,24 +160,17 @@ function showDetail(j) {
       ? `Marche ${leg.from.name} → ${leg.to.name}`
       : `${legBadge(leg)} Ligne ${leg.line}${leg.line_name ? " — " + leg.line_name : ""}` +
         (leg.vehicle_label ? ` · ${leg.vehicle_label}` : "");
+    const buy = (leg.booking && leg.booking.url)
+      ? ` <a class="ticket-chip" href="${leg.booking.url}" target="_blank" rel="noopener noreferrer">Acheter ce billet (Trainline)</a>`
+      : "";
     li.innerHTML = `<div class="time">${fmtTime(leg.from.time)}</div>
-      <div><span class="station">${leg.from.name}</span><div class="leg-info">${info}</div></div>`;
+      <div><span class="station">${leg.from.name}</span><div class="leg-info">${info}${buy}</div></div>`;
     timeline.appendChild(li);
     const li2 = document.createElement("li");
     li2.innerHTML = `<div class="time">${fmtTime(leg.to.time)}</div>
       <div><span class="station">${leg.to.name}</span></div>`;
     timeline.appendChild(li2);
   });
-
-  if (j.booking && j.booking.url) {
-    const buy = document.createElement("a");
-    buy.className = "buy-link";
-    buy.href = j.booking.url;
-    buy.target = "_blank";
-    buy.rel = "noopener noreferrer";
-    buy.textContent = "Voir les horaires & acheter sur Trainline";
-    detailBody.appendChild(buy);
-  }
 
   resultsSection.setAttribute("hidden", "");
   detailSection.removeAttribute("hidden");
