@@ -1,5 +1,9 @@
 # TER Finder
 
+![Build Android APK](https://github.com/muarf/PlanTER/actions/workflows/build-apk.yml/badge.svg)
+
+> Déploiement prod : https://ter.zvz.fr — APK Android buildée en CI (GitHub Actions).
+
 Moteur de recherche d'itinéraires **100% TER** en France (trains régionaux + cars TER).
 Voir [`PLAN.md`](PLAN.md) pour le cahier des charges complet et le découpage en tâches.
 
