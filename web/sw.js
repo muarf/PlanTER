@@ -1,7 +1,7 @@
 /* TER Finder — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v1";
+const CACHE = "ter-finder-v2";
 const SHELL = [
   "/",
   "/styles.css",
@@ -94,6 +94,6 @@ self.addEventListener("fetch", (event) => {
   /* Assets du shell : cache-first. */
   if (url.pathname.startsWith("/styles.css") || url.pathname.startsWith("/app.js") ||
       url.pathname.startsWith("/icon-") || url.pathname === "/manifest.webmanifest") {
-    event.respondWith(staleWhileRevalidate(req, CACHE));
+    event.respondWith(networkFirst(req, CACHE));
   }
 });

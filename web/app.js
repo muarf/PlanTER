@@ -131,7 +131,10 @@ function renderJourneys(journeys) {
       <div class="journey-meta">
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
         · ${j.transfers} correspondance(s) · ${lines}${badges}
-      </div>`;
+      </div>
+      ${j.booking && j.booking.url
+        ? `<a class="buy-link buy-link-small" href="${j.booking.url}" target="_blank" rel="noopener noreferrer">Acheter sur Trainline</a>`
+        : ""}`;
     btn.addEventListener("click", () => showDetail(j));
     li.appendChild(btn);
     journeysList.appendChild(li);

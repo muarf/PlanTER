@@ -128,3 +128,10 @@ footer a { color: var(--ter-dark); }
   text-decoration: none;
 }
 .buy-link:hover { background: #d4a800; }
+
+.buy-link-small {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+}
