@@ -157,7 +157,7 @@ class RaptorTestCase(unittest.TestCase):
         trip_id = j.legs[0].trip_id
         trip = self.g.trips[self.g.trip_index[trip_id]]
         delays = {st.stop: 15 for st in trip.stop_times}
-        feed = gtfs_rt.RealtimeFeed(trip_delays={trip_id: delays})
+        feed = gtfs_rt.RealtimeFeed(trip_delays={(trip_id, DATE): delays})
         jr = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, realtime=feed)[0]
         self.assertEqual(jr.departure, j.departure + 15)
         self.assertEqual(jr.arrival, j.arrival + 15)
@@ -167,7 +167,7 @@ class RaptorTestCase(unittest.TestCase):
         """T8 — un train supprimé disparaît du calcul (bascule sur alternative)."""
         j = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3)[0]
         trip_id = j.legs[0].trip_id
-        feed = gtfs_rt.RealtimeFeed(cancelled={trip_id})
+        feed = gtfs_rt.RealtimeFeed(cancelled={(trip_id, DATE)})
         jr = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, realtime=feed)
         self.assertTrue(jr)
         for jt in jr:
@@ -180,7 +180,7 @@ class RaptorTestCase(unittest.TestCase):
         trip_id = j.legs[-1].trip_id
         trip = self.g.trips[self.g.trip_index[trip_id]]
         delays = {st.stop: 12 for st in trip.stop_times}
-        feed = gtfs_rt.RealtimeFeed(trip_delays={trip_id: delays})
+        feed = gtfs_rt.RealtimeFeed(trip_delays={(trip_id, DATE): delays})
         jr = self.e.arrive_by(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 3, realtime=feed)[0]
         self.assertLessEqual(jr.arrival, _m(13, 0))
         self.assertEqual(jr.arrival, j.arrival + 12)

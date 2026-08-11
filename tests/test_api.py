@@ -232,7 +232,7 @@ class ApiTestCase(unittest.TestCase):
         k7 = j_theo.legs[0]
         trip = g.trips[g.trip_index[k7.trip_id]]
         feed = gtfs_rt.RealtimeFeed(
-            trip_delays={k7.trip_id: {st.stop: 20 for st in trip.stop_times}}
+            trip_delays={(k7.trip_id, DATE_YM): {st.stop: 20 for st in trip.stop_times}}
         )
         # injecte le feed dans le poller (le moteur partage l'instantané)
         saved = api._poller

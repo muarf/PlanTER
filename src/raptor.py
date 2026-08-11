@@ -163,9 +163,9 @@ class RaptorEngine:
             if vehicle == "train_only" and trip.vehicle != "train":
                 continue
             if rt is not None:
-                if trip.id in rt.cancelled:
+                if (trip.id, date) in rt.cancelled:
                     continue
-                delays = rt.trip_delays.get(trip.id)
+                delays = rt.trip_delays.get((trip.id, date))
             else:
                 delays = None
             if mirror:
@@ -299,7 +299,7 @@ class RaptorEngine:
         )
         return self._pareto_journeys(
             arr_by_round, round_parents, transfer_walk, origins, dests, t0,
-            mirror=False, realtime=realtime,
+            date=date, mirror=False, realtime=realtime,
         )
 
     # ------------------------------------------------------------- DepartAfter (large)
@@ -331,7 +331,7 @@ class RaptorEngine:
             )
             for j in self._pareto_journeys(
                 arr_by_round, round_parents, transfer_walk, origins, dests, start,
-                mirror=False, realtime=rt,
+                date=date, mirror=False, realtime=rt,
             ):
                 key = (j.departure, j.arrival, j.transfers,
                        tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
@@ -365,7 +365,7 @@ class RaptorEngine:
         )
         return self._pareto_journeys(
             arr_by_round, round_parents, transfer_walk, dests, origins, t0,
-            mirror=True, realtime=realtime,
+            date=date, mirror=True, realtime=realtime,
         )
 
     # ------------------------------------------------------------- ArriveBy (large)
@@ -396,7 +396,7 @@ class RaptorEngine:
             )
             for j in self._pareto_journeys(
                 arr_by_round, round_parents, transfer_walk, dests, origins, start,
-                mirror=True, realtime=rt,
+                date=date, mirror=True, realtime=rt,
             ):
                 key = (j.departure, j.arrival, j.transfers,
                        tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
@@ -415,6 +415,7 @@ class RaptorEngine:
         origins: list[int],
         dests: list[int],
         t0: int,
+        date: int,
         mirror: bool,
         realtime: Optional[object] = None,
     ) -> list[Journey]:
@@ -432,7 +433,7 @@ class RaptorEngine:
             if best_dest is None:
                 continue
             journey = self._reconstruct(
-                best_dest, rides, arr_by_round, round_parents, transfer_walk, origins, mirror, rt
+                best_dest, rides, arr_by_round, round_parents, transfer_walk, origins, date, mirror, rt
             )
             if journey is None:
                 continue
@@ -479,6 +480,7 @@ class RaptorEngine:
         round_parents: list[dict[int, tuple[int, int]]],
         transfer_walk: dict[int, tuple[int, int]],
         origins: list[int],
+        date: int,
         mirror: bool,
         realtime: Optional[object] = None,
     ) -> Journey | None:
@@ -486,7 +488,7 @@ class RaptorEngine:
         origin_set = set(origins)
         rt_delays = None
         if realtime is not None:
-            rt_delays = {tid: dict(rt) for tid, rt in realtime.trip_delays.items()}
+            rt_delays = {key: dict(d) for key, d in realtime.trip_delays.items()}
         # segs collectés en remontant de `dest` vers l'origine.
         # ('train', trip_idx, board, alight) ou ('walk', a, b, heure_arrivée_b).
         segs: list[tuple] = []
@@ -527,7 +529,7 @@ class RaptorEngine:
             if seg[0] == "train":
                 _, trip_idx, board, alight = seg
                 trip_id = graph.trips[trip_idx].id
-                delays = (rt_delays or {}).get(trip_id, {})
+                delays = (rt_delays or {}).get((trip_id, date), {})
                 leg = self._leg(trip_idx, alight, board) if mirror else self._leg(trip_idx, board, alight)
                 if leg is not None and delays:
                     leg = self._shift_leg(leg, delays, mirror)

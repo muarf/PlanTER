@@ -9,8 +9,15 @@ Polling des flux GTFS-RT SNCF :
 mis à jour toutes les ~2 min, horizon ~60 min.
 
 Structure retenue (partagée avec le moteur) :
-- `RealtimeFeed.trip_delays[trip_id][stop_area_id] = retard en minutes (>=0)`
-- `RealtimeFeed.cancelled[trip_id] = train supprimé`
+- `RealtimeFeed.trip_delays[(trip_id, date_ymd)][stop_area_id] = retard en
+  minutes (>=0)`
+- `RealtimeFeed.cancelled[(trip_id, date_ymd)] = train supprimé ce jour-là`
+
+Clé datée par la date de service réelle (`TripDescriptor.start_date`). Le
+suffixe daté du trip_id SNCF (NewTripId) n'est PAS la date de service : un
+même trip_id circule sur plusieurs jours et le flux n'annonce le retard que
+pour son `start_date` — sans datation, un retard d'aujourd'hui fuirait sur
+toutes les dates du trip (ex. « +10 min dans deux jours »).
 - `RealtimeAlerts.alerts = [RealtimeAlert, ...]` (perturbations, §10)
 
 Le stop_id du flux est « StopPoint:OCETrain TER-<uic8> » ; on le ramène à
@@ -52,8 +59,8 @@ _MAX_ALERT_LEN = 200  # description tronquée exposée (titre complet conservé)
 class RealtimeFeed:
     """État temps réel en mémoire : retards par trip/arrêt et trains supprimés."""
 
-    trip_delays: dict[str, dict[int, int]] = field(default_factory=dict)
-    cancelled: set[str] = field(default_factory=set)
+    trip_delays: dict[tuple[str, int], dict[int, int]] = field(default_factory=dict)
+    cancelled: set[tuple[str, int]] = field(default_factory=set)
     updated_at: int = 0  # epoch (timestamp GTFS-RT)
     fetched_at: float = 0.0  # epoch (heure locale du fetch)
 
@@ -82,6 +89,40 @@ def _to_stop_idx(graph: Graph, stop_id: str) -> Optional[int]:
     return graph.stop_index.get(f"StopArea:OCE{m.group(1)}")
 
 
+def _ts_to_ymd(ts: int) -> int | None:
+    """Date (YYYYMMDD int) d'un horodatage absolu dans le fuseau Europe/Paris."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+
+    return int(
+        _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc)
+        .astimezone(ZoneInfo("Europe/Paris"))
+        .strftime("%Y%m%d")
+    )
+
+
+def _service_date(tue, header_ts: int) -> int | None:
+    """Date de service (YYYYMMDD int) d'un TripUpdate : `TripDescriptor.start_date`
+    si présent, sinon date Europe/Paris de l'horaire absolu (`time`) le plus
+    précoce, sinon celle du header du flux. Renvoie None si indatable : on
+    refuse alors de l'appliquer (ne pas fuiter sur toutes les dates)."""
+    sd = tue.trip.start_date
+    if sd:
+        try:
+            return int(sd)
+        except ValueError:
+            pass
+    times = [
+        getattr(getattr(stu, f), "time")
+        for stu in tue.stop_time_update
+        for f in ("arrival", "departure")
+        if getattr(stu, f).HasField("time")
+    ]
+    if times:
+        return _ts_to_ymd(min(times))
+    return _ts_to_ymd(header_ts) if header_ts else None
+
+
 def parse_trip_updates(payload: bytes, graph: Graph) -> RealtimeFeed:
     """Décode un FeedMessage GTFS-RT et le réduit aux trips TER du graphe."""
     feed = RealtimeFeed()
@@ -103,9 +144,14 @@ def parse_trip_updates(payload: bytes, graph: Graph) -> RealtimeFeed:
         if trip_id not in graph.trip_index:
             continue
 
+        sdate = _service_date(tue, fm.header.timestamp)
+        if sdate is None:
+            continue  # indatable : on ne l'applique à aucune date
+        key = (trip_id, sdate)
+
         rel = tue.trip.schedule_relationship
         if rel == _pb2.TripDescriptor.CANCELED:
-            feed.cancelled.add(trip_id)
+            feed.cancelled.add(key)
             continue
 
         delays: dict[int, int] = {}
@@ -122,7 +168,7 @@ def parse_trip_updates(payload: bytes, graph: Graph) -> RealtimeFeed:
             if d > 0:
                 delays[idx] = d
         if delays:
-            feed.trip_delays[trip_id] = delays
+            feed.trip_delays[key] = delays
 
     return feed
 

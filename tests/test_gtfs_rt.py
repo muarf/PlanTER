@@ -58,6 +58,7 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
+        e.trip_update.trip.start_date = "20260810"
         u1 = e.trip_update.stop_time_update.add()
         u1.stop_id = f"StopPoint:OCETrain TER-{uic1}"
         u1.arrival.delay = 600
@@ -66,8 +67,9 @@ class GtfsRtTestCase(unittest.TestCase):
         u2.departure.delay = 900
 
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        self.assertIn(trip.id, feed.trip_delays)
-        delays = feed.trip_delays[trip.id]
+        key = (trip.id, 20260810)
+        self.assertIn(key, feed.trip_delays)
+        delays = feed.trip_delays[key]
         self.assertEqual(delays[stops[0].stop], 10)
         self.assertEqual(delays[stops[1].stop], 15)
 
@@ -77,10 +79,12 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
+        e.trip_update.trip.start_date = "20260810"
         e.trip_update.trip.schedule_relationship = _pb2.TripDescriptor.CANCELED
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        self.assertIn(trip.id, feed.cancelled)
-        self.assertNotIn(trip.id, feed.trip_delays)
+        key = (trip.id, 20260810)
+        self.assertIn(key, feed.cancelled)
+        self.assertNotIn(key, feed.trip_delays)
 
     def test_trip_hors_graphe_ignore(self):
         """Un trip non présent dans le graphe (ex. TER d'une autre période)
@@ -111,20 +115,21 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
+        e.trip_update.trip.start_date = "20260810"
         u = e.trip_update.stop_time_update.add()
         u.stop_id = "StopPoint:OCETrain TER-00000000"  # UIC inexistant
         u.arrival.delay = 600
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
         # trip connu mais aucun retard mappable -> absent de trip_delays
-        self.assertNotIn(trip.id, feed.trip_delays)
+        self.assertNotIn((trip.id, 20260810), feed.trip_delays)
 
     def test_snapshot_isole(self):
-        feed = gtfs_rt.RealtimeFeed(trip_delays={"t1": {1: 5}}, cancelled={"t2"})
+        feed = gtfs_rt.RealtimeFeed(trip_delays={("t1", 20260810): {1: 5}}, cancelled={("t2", 20260810)})
         snap = feed.snapshot()
-        snap.trip_delays["t1"][1] = 99
-        snap.cancelled.add("t3")
-        self.assertEqual(feed.trip_delays["t1"][1], 5)
-        self.assertNotIn("t3", feed.cancelled)
+        snap.trip_delays[("t1", 20260810)][1] = 99
+        snap.cancelled.add(("t3", 20260810))
+        self.assertEqual(feed.trip_delays[("t1", 20260810)][1], 5)
+        self.assertNotIn(("t3", 20260810), feed.cancelled)
 
     def test_age_fraicheur(self):
         import time
