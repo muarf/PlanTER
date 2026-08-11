@@ -672,7 +672,20 @@ Gares non mappées (peu fréquentes) : `booking.url` vaut `null`, pas de bouton.
 
 ## 18. Prochaines étapes (mise à jour)
 
-Phase 3 (T6 web) livrée et en ligne. Prochaine : **T7** (PWA puis mobile natif).
+**État au 11/08/2026.** Toutes les tâches techniques T1–T8 sont livrées et validées
+(moteur, API, web, PWA/native, temps réel). Restent, par ordre d'opportunité :
+
+1. **Publication stores (§9/Phase 4)** — l'app native Capacitor (T7 v2.2) n'est
+   **pas publiée** sur Play Store / App Store : nécessite comptes développeur
+   (25 € une fois Google, 99 €/an Apple) + soumission manuelle. Non bloquant.
+2. **Surveillance opérationnelle** — le polling GTFS-RT et le refresh hebdo n'ont
+   pas d'alerting : prévoir un contrôle externe (ex. uptime check sur `/v1/health`
+   + alerte si `realtime.alerts.fresh=false` prolongé, ou si `last_refresh.status`
+   échoue).
+3. **Programme d'affiliation (T9/Phase 6)** — le PoC (liens Trainline) est livré ;
+   le programme proprement dit (commission, paramètre d'affiliation, tracking)
+   dépend d'un accord commercial, hors code.
+
 Les déploiements web/API sont documentés en §13.
 
 ## 19. Exécution T8 (temps réel GTFS-RT) — 11/08/2026
