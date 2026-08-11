@@ -157,6 +157,46 @@ def _bare_journey(j: dict) -> dict:
     return j
 
 
+# T8 — une correspondance est « risquée » si le train entrant est en retard et
+# que la marge réelle jusqu'au départ suivant (marche comprise) reste faible.
+CONNECTION_SLACK_MIN = 5  # minutes
+
+
+def _connection_risks(jd: dict) -> list[dict]:
+    """Correspondances à risque sur un trajet temps réel (T8).
+
+    Une correspondance manquée devient possible quand le leg entrant est en
+    retard (`delay_min > 0`) et que l'écart réel au départ du leg suivant est
+    trop court pour absorber une aggravation du retard. On signale la gare,
+    les lignes concernées, le retard et la marge réelle restante."""
+    rail = [l for l in jd["legs"] if l["type"] != "walk"]
+    risks = []
+    for a, b in zip(rail, rail[1:]):
+        if a["delay_min"] <= 0:
+            continue
+        margin = _minutes(b["from"]["time"]) - _minutes(a["to"]["time"])
+        # Le retard a déjà consommé une partie de la marge planifiée : si la
+        # marge restante (au-delà du retard) est inférieure au seuil, une
+        # aggravation fait rater la correspondance.
+        if margin - a["delay_min"] < CONNECTION_SLACK_MIN:
+            risks.append(
+                {
+                    "at_station": b["from"]["name"],
+                    "from_line": a["line"],
+                    "to_line": b["line"],
+                    "delay_min": a["delay_min"],
+                    "margin_min": margin,
+                }
+            )
+    return risks
+
+
+def _minutes(iso: str) -> int:
+    """ISO « YYYY-MM-DDTHH:MM:SS+hh:mm » → minutes depuis l'époque (legs de nuit
+    et changements de jour gérés naturellement par le timestamp absolu)."""
+    return int(_dt.datetime.fromisoformat(iso).timestamp()) // 60
+
+
 # ---------------------------------------------------------------- application
 app = FastAPI(
     title="TER Finder API",
@@ -299,6 +339,9 @@ def journeys(
                 leg["booking"] = {"provider": "trainline", "url": url}
                 bookable += 1
         jd["booking"] = {"provider": "trainline", "tickets": bookable}
+        # T8 — correspondances à risque (retard réel menaçant la jonction).
+        if realtime is not None:
+            jd["connection_risks"] = _connection_risks(jd)
         out.append(jd)
     return {"journeys": out}
 

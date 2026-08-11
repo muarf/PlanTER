@@ -184,6 +184,50 @@ class ApiTestCase(unittest.TestCase):
         j = r.json()["journeys"][0]
         self.assertEqual(j["legs"][0]["delay_min"], 0)
 
+    def test_connection_risks_detecte_retard_rongeant_la_marge(self):
+        """T8 — une correspondance dont le retard a consommé la marge planifiée
+        est signalée (connection_risks) ; absente sans temps réel."""
+        from src import api, gtfs_rt
+        from src.raptor import RaptorEngine
+
+        engine = api.get_engine()
+        g = engine.graph
+        j_theo = engine.depart_after(
+            DATE_YM, g.resolve_place("Paris Gare de Lyon"),
+            g.resolve_place("Besançon Viotte"), 7 * 60, 3,
+        )[0]
+        k7 = j_theo.legs[0]
+        trip = g.trips[g.trip_index[k7.trip_id]]
+        feed = gtfs_rt.RealtimeFeed(
+            trip_delays={k7.trip_id: {st.stop: 20 for st in trip.stop_times}}
+        )
+        # injecte le feed dans le poller (le moteur partage l'instantané)
+        saved = api._poller
+        api._poller = gtfs_rt.RealtimePoller(g)
+        api._poller.feed = feed
+        try:
+            r = self.client.get(
+                "/v1/journeys",
+                params={"from": "Paris Gare de Lyon", "to": "Besançon Viotte",
+                        "date": DATE, "time": "07:00", "use_realtime": "true"},
+            )
+        finally:
+            api._poller = saved
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        risks = j.get("connection_risks", [])
+        self.assertTrue(risks, "le retard K7 20 min doit signaler une correspondance risquée")
+        self.assertEqual(risks[0]["at_station"], "Dijon")
+        self.assertEqual(risks[0]["from_line"], "K7")
+        self.assertEqual(risks[0]["delay_min"], 20)
+        # sans temps réel, aucune section risks
+        r0 = self.client.get(
+            "/v1/journeys",
+            params={"from": "Paris Gare de Lyon", "to": "Besançon Viotte",
+                    "date": DATE, "time": "07:00"},
+        )
+        self.assertNotIn("connection_risks", r0.json()["journeys"][0])
+
     # ----------------------------------------------------------------- errors
     def test_gare_introuvable_404(self):
         r = self.client.get(

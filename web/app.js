@@ -120,6 +120,15 @@ function delayBadge(leg) {
   return `<span class="badge badge-delay" title="Retard réel">+${m} min</span>`;
 }
 
+function riskNote(j) {
+  if (!j.connection_risks || !j.connection_risks.length) return "";
+  const first = j.connection_risks[0];
+  const n = j.connection_risks.length;
+  return `<div class="connection-risk">⚠ Correspondance risquée à <strong>${first.at_station}</strong>` +
+    ` (${first.from_line} +${first.delay_min} min → marge ${first.margin_min} min)` +
+    `${n > 1 ? ` et ${n - 1} autre(s)` : ""}. Retard déjà consommé sur la marge planifiée.</div>`;
+}
+
 function renderJourneys(journeys) {
   resultsSection.removeAttribute("hidden");
   journeysList.innerHTML = "";
@@ -143,25 +152,31 @@ function renderJourneys(journeys) {
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
         · ${j.transfers} correspondance(s) · ${lines}${badges}
       </div>
+      ${riskNote(j)}
       ${j.booking && j.booking.tickets
         ? `<div class="ticket-links">${j.legs.filter((l) => l.booking && l.booking.url)
             .map((l) => `<a class="ticket-chip" href="${l.booking.url}" target="_blank" rel="noopener noreferrer">Billet ${l.line || "trajet"} · Trainline</a>`)
             .join("")}</div>`
         : ""}`;
-    btn.addEventListener("click", () => showDetail(j));
+    btn.addEventListener("click", () => showDetail(j, true));
     li.appendChild(btn);
     journeysList.appendChild(li);
   });
 }
 
 /* ------------------------------------------------------------------- détail */
-function showDetail(j) {
+function showDetail(j, withAlternative) {
+  const alt = (withAlternative && j.connection_risks && j.connection_risks.length)
+    ? `<button type="button" class="alt-button" id="alt-button">Voir une alternative plus tard (+30 min)</button>`
+    : "";
   detailBody.innerHTML = `<div class="journey-head">
       <span class="journey-times">${fmtTime(j.departure)} → ${fmtTime(j.arrival)}</span>
       ${nextDay(j.arrival) ? '<span class="badge badge-next-day">+1j</span>' : ""}
     </div>
     <p class="journey-meta">Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
       · ${j.transfers} correspondance(s)</p>
+    ${riskNote(j)}
+    ${alt}
     <ol class="timeline"></ol>`;
   const timeline = detailBody.querySelector(".timeline");
 
@@ -184,6 +199,11 @@ function showDetail(j) {
     timeline.appendChild(li2);
   });
 
+  const altBtn = detailBody.querySelector("#alt-button");
+  if (altBtn) {
+    altBtn.addEventListener("click", () => search(30));
+  }
+
   resultsSection.setAttribute("hidden", "");
   detailSection.removeAttribute("hidden");
   detailSection.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -195,17 +215,24 @@ $("#detail-back").addEventListener("click", () => {
 });
 
 /* -------------------------------------------------------------------- submit */
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function search(timeShiftMin = 0) {
   searchError.setAttribute("hidden", "");
   searchButton.disabled = true;
   searchButton.textContent = "Recherche…";
+
+  let time = $("#time").value;
+  if (timeShiftMin > 0) {
+    const [hh, mm] = time.split(":").map(Number);
+    const shifted = new Date(2000, 0, 1, hh, mm + timeShiftMin);
+    time = `${String(shifted.getHours()).padStart(2, "0")}:${String(shifted.getMinutes()).padStart(2, "0")}`;
+    $("#time").value = time;
+  }
 
   const params = new URLSearchParams({
     from: fromInput.value.trim(),
     to: toInput.value.trim(),
     date: $("#date").value,
-    time: $("#time").value,
+    time: time,
     datetime_represents: form.elements.datetime_represents.value,
     vehicle: form.elements.vehicle.checked ? "train_only" : "all",
     count: "5",
@@ -225,6 +252,7 @@ form.addEventListener("submit", async (e) => {
       return;
     }
     lastJourneys = body.journeys;
+    detailSection.setAttribute("hidden", "");
     renderJourneys(lastJourneys);
     resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
@@ -234,6 +262,11 @@ form.addEventListener("submit", async (e) => {
     searchButton.disabled = false;
     searchButton.textContent = "Rechercher";
   }
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  search();
 });
 
 initDateRange();

@@ -99,6 +99,17 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 .badge-next-day { background: #fde8e6; color: #8c2d26; }
 .badge-delay { background: #fff3cd; color: #8a6100; }
 .rt-delay { color: #b45309; }
+.connection-risk {
+  margin-top: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 6px;
+  background: #fff7e6; border: 1px solid #e0c080; color: #7a5200;
+  font-size: 0.82rem; line-height: 1.4;
+}
+.alt-button {
+  display: inline-block; margin-top: 0.6rem; padding: 0.4rem 0.7rem;
+  border: 1px solid var(--ter-dark); border-radius: 6px; background: var(--ter-dark);
+  color: #fff; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+}
+.alt-button:hover { opacity: 0.9; }
 
 /* ------------------------------------------------------------------- détail */
 #detail-body { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
