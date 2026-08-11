@@ -46,12 +46,14 @@ jobs:
           name: ter-finder-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-  # AAB release signé (Play Store). Ne tourne que si les secrets de signature
-  # sont configurés (repo Settings → Secrets) : KEYSTORE_BASE64, KEYSTORE_PASSWORD,
-  # KEY_ALIAS, KEY_PASSWORD. Sinon, seul le job `build` (APK debug) s'exécute.
+  # AAB release signé (Play Store). Ne construit le AAB que si les secrets de
+  # signature sont configurés (repo Settings → Secrets) : KEYSTORE_BASE64,
+  # KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD. Les secrets ne peuvent pas être
+  # référencés dans un `if` de job (limitation GitHub Actions) : la vérification
+  # se fait par une étape qui lit KEYSTORE_BASE64 via env et exporte skip=true.
   release:
     needs: build
-    if: ${{ github.event_name != 'pull_request' && secrets.KEYSTORE_BASE64 != '' }}
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -80,12 +82,25 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
+      - name: Check keystore availability
+        id: keystore
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
       - name: Decode signing keystore
+        if: steps.keystore.outputs.skip != 'true'
         run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/ter-finder.keystore"
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
       - name: Build Signed Release AAB
+        if: steps.keystore.outputs.skip != 'true'
         run: cd android && KEYSTORE_PATH="$RUNNER_TEMP/ter-finder.keystore" ./gradlew bundleRelease --no-daemon
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -93,6 +108,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Upload AAB Artifact
+        if: steps.keystore.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ter-finder-release-aab
