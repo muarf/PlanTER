@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date as _date
+from typing import Optional
 
 from src.graph import Graph
 
@@ -68,6 +69,7 @@ class Leg:
     to_id: str
     to_name: str
     to_time: int
+    delay_min: int = 0  # T8 : retard GTFS-RT à l'embarquement (minutes)
 
     def to_json(self, d: _date) -> dict:
         return {
@@ -75,6 +77,7 @@ class Leg:
             "line": self.line,
             "line_name": self.line_name,
             "vehicle_label": self.vehicle_label,
+            "delay_min": self.delay_min,
             "from": {"stop_area_id": self.from_id, "name": self.from_name, "time": _iso(d, self.from_time)},
             "to": {"stop_area_id": self.to_id, "name": self.to_name, "time": _iso(d, self.to_time)},
         }
@@ -134,30 +137,62 @@ class RaptorEngine:
             self._active_cache[date] = self.graph.active_trip_indices(date)
         return self._active_cache[date]
 
-    def _views(self, date: int, vehicle: str, mirror: bool = False) -> dict[int, list[tuple[int, list]]]:
+    def _views(
+        self,
+        date: int,
+        vehicle: str,
+        mirror: bool = False,
+        realtime: Optional[object] = None,
+    ) -> dict[int, list[tuple[int, list]]]:
         """Trips actifs filtrés par mode, indexés par route.
 
         Chaque vue = (trip_idx, [(stop, arr, dep), ...]) triée par premier
         départ. `mirror=True` renverse les temps pour ArriveBy.
+
+        T8 — `realtime` (flux GTFS-RT, optionnel) : applique les retards aux
+        horaires et exclut les trains supprimés. Les retards > 0 sont ajoutés à
+        chaque arrêt concerné du trip (un train en avance n'est pas avancé).
         """
-        key = (date, vehicle, mirror)
-        if key in self._views_cache:
+        key = (date, vehicle, mirror, bool(realtime))
+        if realtime is None and key in self._views_cache:
             return self._views_cache[key]
+        rt = realtime.snapshot() if realtime is not None else None
         views: dict[int, list[tuple[int, list]]] = {}
         for trip_idx in self.active_trips(date):
             trip = self.graph.trips[trip_idx]
             if vehicle == "train_only" and trip.vehicle != "train":
                 continue
-            if mirror:
-                view = [(st.stop, MAXT - st.dep, MAXT - st.arr) for st in reversed(trip.stop_times)]
+            if rt is not None:
+                if trip.id in rt.cancelled:
+                    continue
+                delays = rt.trip_delays.get(trip.id)
             else:
-                view = [(st.stop, st.arr, st.dep) for st in trip.stop_times]
+                delays = None
+            if mirror:
+                if delays is None:
+                    view = [(st.stop, MAXT - st.dep, MAXT - st.arr) for st in reversed(trip.stop_times)]
+                else:
+                    view = [
+                        (st.stop, MAXT - (st.dep + delays.get(st.stop, 0)),
+                         MAXT - (st.arr + delays.get(st.stop, 0)))
+                        for st in reversed(trip.stop_times)
+                    ]
+            else:
+                if delays is None:
+                    view = [(st.stop, st.arr, st.dep) for st in trip.stop_times]
+                else:
+                    view = [
+                        (st.stop, st.arr + delays.get(st.stop, 0),
+                         st.dep + delays.get(st.stop, 0))
+                        for st in trip.stop_times
+                    ]
             if not view:
                 continue
             views.setdefault(trip.route, []).append((trip_idx, view))
         for r in views:
             views[r].sort(key=lambda tv: tv[1][0][2])
-        self._views_cache[key] = views
+        if realtime is None:
+            self._views_cache[key] = views
         return views
 
     # ------------------------------------------------------------- cœur
@@ -256,13 +291,15 @@ class RaptorEngine:
         t0: int,
         max_transfers: int,
         vehicle: str = "all",
+        realtime: Optional[object] = None,
     ) -> list[Journey]:
-        views = self._views(date, vehicle, mirror=False)
+        views = self._views(date, vehicle, mirror=False, realtime=realtime)
         arr_by_round, round_parents, transfer_walk = self._rounds(
             views, origins, dests, t0, max_transfers, t0 + HORIZON_MIN
         )
         return self._pareto_journeys(
-            arr_by_round, round_parents, transfer_walk, origins, dests, t0, mirror=False
+            arr_by_round, round_parents, transfer_walk, origins, dests, t0,
+            mirror=False, realtime=realtime,
         )
 
     # ------------------------------------------------------------- ArriveBy
@@ -274,6 +311,7 @@ class RaptorEngine:
         deadline: int,
         max_transfers: int,
         vehicle: str = "all",
+        realtime: Optional[object] = None,
     ) -> list[Journey]:
         """Arrivée au plus tard `deadline` : part le plus tard possible.
 
@@ -282,12 +320,13 @@ class RaptorEngine:
         partant au plus tôt à MAXT - deadline dans le temps renversé.
         """
         t0 = MAXT - deadline
-        views = self._views(date, vehicle, mirror=True)
+        views = self._views(date, vehicle, mirror=True, realtime=realtime)
         arr_by_round, round_parents, transfer_walk = self._rounds(
             views, dests, origins, t0, max_transfers, MAXT
         )
         return self._pareto_journeys(
-            arr_by_round, round_parents, transfer_walk, dests, origins, t0, mirror=True
+            arr_by_round, round_parents, transfer_walk, dests, origins, t0,
+            mirror=True, realtime=realtime,
         )
 
     # ------------------------------------------------------------- Pareto
@@ -300,10 +339,12 @@ class RaptorEngine:
         dests: list[int],
         t0: int,
         mirror: bool,
+        realtime: Optional[object] = None,
     ) -> list[Journey]:
         dest_set = set(dests)
         journeys: list[Journey] = []
         best_so_far = float("inf")
+        rt = realtime.snapshot() if realtime is not None else None
         for idx, k_arr in enumerate(arr_by_round):
             rides = idx + 1
             best_dest = min(
@@ -314,7 +355,7 @@ class RaptorEngine:
             if best_dest is None:
                 continue
             journey = self._reconstruct(
-                best_dest, rides, arr_by_round, round_parents, transfer_walk, origins, mirror
+                best_dest, rides, arr_by_round, round_parents, transfer_walk, origins, mirror, rt
             )
             if journey is None:
                 continue
@@ -362,9 +403,13 @@ class RaptorEngine:
         transfer_walk: dict[int, tuple[int, int]],
         origins: list[int],
         mirror: bool,
+        realtime: Optional[object] = None,
     ) -> Journey | None:
         graph = self.graph
         origin_set = set(origins)
+        rt_delays = None
+        if realtime is not None:
+            rt_delays = {tid: dict(rt) for tid, rt in realtime.trip_delays.items()}
         # segs collectés en remontant de `dest` vers l'origine.
         # ('train', trip_idx, board, alight) ou ('walk', a, b, heure_arrivée_b).
         segs: list[tuple] = []
@@ -404,7 +449,11 @@ class RaptorEngine:
         for seg in travel:
             if seg[0] == "train":
                 _, trip_idx, board, alight = seg
+                trip_id = graph.trips[trip_idx].id
+                delays = (rt_delays or {}).get(trip_id, {})
                 leg = self._leg(trip_idx, alight, board) if mirror else self._leg(trip_idx, board, alight)
+                if leg is not None and delays:
+                    leg = self._shift_leg(leg, delays, mirror)
             else:
                 walk_count += 1
                 _, a, b, to_time = seg
@@ -425,6 +474,23 @@ class RaptorEngine:
         departure = legs[0].from_time if legs else MAXT
         arrival = legs[-1].to_time if legs else MAXT
         return Journey(departure=departure, arrival=arrival, transfers=len(legs) - 1, legs=legs)
+
+    def _shift_leg(self, leg: Leg, delays: dict[int, int], mirror: bool) -> Leg:
+        """T8 — applique les retards GTFS-RT à un leg.
+
+        `delays` est indexé par stop_idx (int). Le départ du leg prend le retard
+        à l'arrêt d'embarquement, l'arrivée celui à l'arrêt de débarquement
+        (identique à la construction des vues, pour la cohérence des horaires)."""
+        from_idx = self.graph.stop_index.get(leg.from_id)
+        to_idx = self.graph.stop_index.get(leg.to_id)
+        if from_idx is not None:
+            d_from = delays.get(from_idx, 0)
+            leg.from_time += d_from
+            leg.delay_min = max(leg.delay_min, d_from)
+        if to_idx is not None:
+            d_to = delays.get(to_idx, 0)
+            leg.to_time += d_to
+        return leg
 
     def _walk_leg(self, a: int, b: int, to_time: int, mirror: bool) -> Leg:
         graph = self.graph

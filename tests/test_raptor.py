@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.graph import Graph
 from src.raptor import RaptorEngine
+from src import gtfs_rt
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 DATE = 20260810  # un lundi
@@ -148,6 +149,42 @@ class RaptorTestCase(unittest.TestCase):
         pd = g.resolve_place("Lyon Part Dieu")[0]
         c23 = next(r for r in g.routes if r.short_name == "C23" and "Lyon" in (r.long_name or ""))
         self.assertIn(g.routes.index(c23), g.routes_by_stop[pd])
+
+    # -------------------------------------------------------------- T8 temps réel
+    def test_rt_delay_decale_le_depart(self):
+        """T8 — un retard GTFS-RT décale le départ/arrivée du leg d'autant."""
+        j = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3)[0]
+        trip_id = j.legs[0].trip_id
+        trip = self.g.trips[self.g.trip_index[trip_id]]
+        delays = {st.stop: 15 for st in trip.stop_times}
+        feed = gtfs_rt.RealtimeFeed(trip_delays={trip_id: delays})
+        jr = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, realtime=feed)[0]
+        self.assertEqual(jr.departure, j.departure + 15)
+        self.assertEqual(jr.arrival, j.arrival + 15)
+        self.assertEqual(jr.legs[0].delay_min, 15)
+
+    def test_rt_cancel_bascule_sur_alternative(self):
+        """T8 — un train supprimé disparaît du calcul (bascule sur alternative)."""
+        j = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3)[0]
+        trip_id = j.legs[0].trip_id
+        feed = gtfs_rt.RealtimeFeed(cancelled={trip_id})
+        jr = self.e.depart_after(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, realtime=feed)
+        self.assertTrue(jr)
+        for jt in jr:
+            for leg in jt.legs:
+                self.assertNotEqual(leg.trip_id, trip_id)
+
+    def test_rt_arrive_by_miroir(self):
+        """T8 — le retard s'applique aussi en mode ArriveBy (miroir)."""
+        j = self.e.arrive_by(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 3)[0]
+        trip_id = j.legs[-1].trip_id
+        trip = self.g.trips[self.g.trip_index[trip_id]]
+        delays = {st.stop: 12 for st in trip.stop_times}
+        feed = gtfs_rt.RealtimeFeed(trip_delays={trip_id: delays})
+        jr = self.e.arrive_by(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 3, realtime=feed)[0]
+        self.assertLessEqual(jr.arrival, _m(13, 0))
+        self.assertEqual(jr.arrival, j.arrival + 12)
+        self.assertEqual(jr.legs[-1].delay_min, 12)
 
     # -------------------------------------------------------------- json
     def test_to_json(self):

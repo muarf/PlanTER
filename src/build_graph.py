@@ -200,6 +200,7 @@ def _build_graph(zip_path: Path, interchange: dict[str, str], links: dict[str, s
 
     for tidx, trip in enumerate(graph.trips):
         graph.trips_by_route[trip.route].append(tidx)
+        graph.trip_index[trip.id] = tidx
         seen = set()
         for st in trip.stop_times:
             if st.stop not in seen:  # dédup (trip, arrêt) — pas (trip, route) !

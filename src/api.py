@@ -14,6 +14,7 @@ Démarrage :  uvicorn src.api:app --host 0.0.0.0 --port 8000
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import re
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from starlette.types import Scope, Receive, Send
 
 from src.graph import Graph, ALIASES
 from src.raptor import RaptorEngine
-from src import trainline
+from src import gtfs_rt, trainline
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -35,14 +36,31 @@ _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 _COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 _engine: RaptorEngine | None = None
+_poller: gtfs_rt.RealtimePoller | None = None
 
 
 def get_engine(graph_path: Path = DEFAULT_GRAPH) -> RaptorEngine:
     """Charge le graphe une seule fois (module-level), puis le partage."""
-    global _engine
+    global _engine, _poller
     if _engine is None:
         _engine = RaptorEngine(Graph.load(graph_path))
+        # T8 — temps réel GTFS-RT en arrière-plan ; l'échec de démarrage ne
+        # bloque pas l'API (le poller retentera au prochain intervalle).
+        try:
+            _poller = gtfs_rt.RealtimePoller(_engine.graph)
+            _poller.start()
+        except Exception:
+            _poller = None
     return _engine
+
+
+def _lifespan(app: FastAPI):
+    yield
+    # Arrêt propre du poller GTFS-RT à la fermeture (uvicorn --reload).
+    global _poller
+    if _poller is not None:
+        _poller.stop()
+        _poller = None
 
 
 # ---------------------------------------------------------------- helpers
@@ -144,6 +162,7 @@ app = FastAPI(
     title="TER Finder API",
     description="Recherche d'itinéraires 100% TER (moteur McRAPTOR).",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 
@@ -163,7 +182,39 @@ def health() -> dict:
         "coverage_start": f"{g.date_min // 10000:04d}-{g.date_min % 10000 // 100:02d}-{g.date_min % 100:02d}",
         "coverage_end": f"{g.date_max // 10000:04d}-{g.date_max % 10000 // 100:02d}-{g.date_max % 100:02d}",
         "stations": len(g.stops),
+        "last_refresh": _last_refresh(),
+        "realtime": _realtime_health(),
     }
+
+
+def _realtime_health() -> dict | None:
+    """T8 — état du flux GTFS-RT : fraîcheur (âge en s), nombre de trips
+    retardés/supprimés, horodatage GTFS-RT. None si le poller n'est pas actif."""
+    global _poller
+    if _poller is None:
+        return None
+    feed = _poller.snapshot()
+    return {
+        "polling": feed.fetched_at > 0,
+        "age_s": feed.age_s(),
+        "fresh": feed.is_fresh,
+        "delayed_trips": len(feed.trip_delays),
+        "cancelled_trips": len(feed.cancelled),
+        "gtfs_rt_timestamp": _dt.datetime.fromtimestamp(feed.updated_at, tz=_dt.timezone.utc).isoformat()
+        if feed.updated_at
+        else None,
+    }
+
+
+def _last_refresh() -> dict | None:
+    """Dernier refresh hebdomadaire (scripts/refresh_data.sh) : statut, date,
+    couverture — None si jamais exécuté. Journal lisible par l'humain dans
+    reports/refresh.log."""
+    f = Path(__file__).resolve().parents[1] / "data" / "refresh_status.json"
+    try:
+        return json.loads(f.read_text())
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 @app.get("/v1/stations/search", tags=["gares"])
@@ -198,6 +249,7 @@ def journeys(
     max_transfers: int = Query(6, ge=0, le=6),
     vehicle: str = Query("all", pattern="^(all|train_only)$"),
     count: int = Query(5, ge=1, le=20),
+    use_realtime: bool = Query(False, description="T8 — appliquer les retards/suppressions GTFS-RT"),
 ) -> dict:
     engine = get_engine()
     g = engine.graph
@@ -207,10 +259,14 @@ def journeys(
     origins = _resolve_place(g, from_)
     dests = _resolve_place(g, to)
 
+    # T8 — le moteur consomme un instantané du poller (graphe et temps réel
+    # sont partagés en lecture seule via snapshot()).
+    realtime = _poller.snapshot() if (use_realtime and _poller is not None) else None
+
     if datetime_represents == "arrival":
-        journeys = engine.arrive_by(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle)
+        journeys = engine.arrive_by(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
     else:
-        journeys = engine.depart_after(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle)
+        journeys = engine.depart_after(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
 
     journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]
 

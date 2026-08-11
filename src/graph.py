@@ -80,6 +80,7 @@ class Graph:
     # Index de routage
     trips_by_route: list[list[int]] = field(default_factory=list)  # route_idx -> [trip_idx]
     routes_by_stop: list[list[int]] = field(default_factory=list)  # stop_idx -> [route_idx]
+    trip_index: dict[str, int] = field(default_factory=dict)  # trip_id -> trip_idx
 
     # Correspondances : temps par gare (défaut DEFAULT_MIN_TRANSFER_MIN)
     min_transfer: list[int] = field(default_factory=list)  # stop_idx -> minutes

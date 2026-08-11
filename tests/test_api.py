@@ -34,6 +34,8 @@ class ApiTestCase(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["status"], "ok")
         self.assertEqual(body["data_date"], "2026-12-19")
+        # T8 — section temps réel (peut être None si le poller est désactivé)
+        self.assertIn("realtime", body)
 
     # ------------------------------------------------------------- stations
     def test_stations_search(self):
@@ -159,6 +161,29 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(r.json()["journeys"]), 1)
 
+    # ------------------------------------------------------------- T8 temps réel
+    def test_journeys_use_realtime_delay_min_present(self):
+        """T8 — use_realtime=true : chaque leg expose delay_min (0 par défaut)."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00", "use_realtime": "true"},
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        for leg in j["legs"]:
+            self.assertIn("delay_min", leg)
+            self.assertGreaterEqual(leg["delay_min"], 0)
+
+    def test_journeys_sans_realtime_zero(self):
+        """T8 — sans use_realtime, delay_min vaut 0 (pas de temps réel appliqué)."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        self.assertEqual(j["legs"][0]["delay_min"], 0)
+
     # ----------------------------------------------------------------- errors
     def test_gare_introuvable_404(self):
         r = self.client.get(
@@ -225,6 +250,8 @@ class WebTestCase(unittest.TestCase):
         self.assertIn('id="search-form"', html)
         self.assertIn('id="from"', html)
         self.assertIn('id="to"', html)
+        # T8 — option temps réel dans le formulaire
+        self.assertIn('name="realtime"', html)
 
     def test_assets_servis(self):
         self.assertEqual(self.client.get("/styles.css").status_code, 200)

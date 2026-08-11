@@ -114,6 +114,12 @@ function nextDay(iso) {
   return date !== $("#date").value;
 }
 
+function delayBadge(leg) {
+  if (!leg.delay_min) return "";
+  const m = leg.delay_min;
+  return `<span class="badge badge-delay" title="Retard réel">+${m} min</span>`;
+}
+
 function renderJourneys(journeys) {
   resultsSection.removeAttribute("hidden");
   journeysList.innerHTML = "";
@@ -126,10 +132,12 @@ function renderJourneys(journeys) {
     btn.type = "button";
     const lines = [...new Set(j.legs.filter((l) => l.type !== "walk").map((l) => l.line))].join(" + ");
     const badges = j.legs.map(legBadge).join("");
+    const delays = j.legs.map(delayBadge).join("");
     btn.innerHTML = `
       <div class="journey-head">
         <span class="journey-times">${fmtTime(j.departure)} → ${fmtTime(j.arrival)}</span>
         ${nextDay(j.arrival) ? '<span class="badge badge-next-day">+1j</span>' : ""}
+        ${delays}
       </div>
       <div class="journey-meta">
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
@@ -162,11 +170,12 @@ function showDetail(j) {
     const info = leg.type === "walk"
       ? `Marche ${leg.from.name} → ${leg.to.name}`
       : `${legBadge(leg)} Ligne ${leg.line}${leg.line_name ? " — " + leg.line_name : ""}` +
-        (leg.vehicle_label ? ` · ${leg.vehicle_label}` : "");
+        (leg.vehicle_label ? ` · ${leg.vehicle_label}` : "") +
+        (leg.delay_min ? ` · <strong class="rt-delay">retard ${leg.delay_min} min</strong>` : "");
     const buy = (leg.booking && leg.booking.url)
       ? ` <a class="ticket-chip" href="${leg.booking.url}" target="_blank" rel="noopener noreferrer">Acheter ce billet (Trainline)</a>`
       : "";
-    li.innerHTML = `<div class="time">${fmtTime(leg.from.time)}</div>
+    li.innerHTML = `<div class="time">${fmtTime(leg.from.time)}${delayBadge(leg)}</div>
       <div><span class="station">${leg.from.name}</span><div class="leg-info">${info}${buy}</div></div>`;
     timeline.appendChild(li);
     const li2 = document.createElement("li");
@@ -201,6 +210,7 @@ form.addEventListener("submit", async (e) => {
     vehicle: form.elements.vehicle.checked ? "train_only" : "all",
     count: "5",
   });
+  if (form.elements.realtime.checked) params.set("use_realtime", "true");
 
   try {
     const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);
