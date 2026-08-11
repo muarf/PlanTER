@@ -646,19 +646,20 @@ PoC de monétisation : des liens de réservation Trainline pré-remplis, sans pa
 ### Découverte : format des liens et cartographie
 
 - L'URL « deep link » fonctionnelle est `https://www.thetrainline.com/book/results?origin={code}&destination={code}&outbound_date={YYYY-MM-DD}[&outbound_time={HH:MM}]` (les URL `trainline.com/search/{slug}-to-{slug}/on/…` renvoient 404). L'API de recherche est chargée côté client, pas de validation HTTP possible sans navigateur.
-- Cartographie UIC → code : le repo public **`trainline-eu/stations-studio`** publie `public/stations.csv` (id, slug, `uic8_sncf`, `sncf_id` FR…). Téléchargé puis réduit aux gares FR avec `sncf_id` (`config/trainline_stations.csv`, 4456 lignes, 4000 UIC uniques).
+- Cartographie UIC → **slug Trainline** : le repo public **`trainline-eu/stations-studio`** publie `public/stations.csv` (id, slug, `uic8_sncf`, `sncf_id` FR…). Téléchargé puis réduit aux gares FR (`config/trainline_stations.csv`, 4456 lignes, 4000 UIC uniques).
+- **Format du code validé le 11/08/2026** (navigateur headless Chromium sur big-arm, inspection du DOM rendu) : seul le **slug** est accepté par `/book/results` (`origin=dijon-ville&destination=besancon-viotte` → gares résolues). Les codes `sncf_id` (FRPLY…) déclenchent « Le code d'emplacement de la gare de départ doit être indiqué » et les ids numériques (38, 45…) ne résolvent aucune gare.
 
 ### Implémentation
 
-- `src/trainline.py` : chargement CSV (cache), `code_for(stop_area_id)` (accepte `StopArea:OCE…` / `OCE…`), `booking_url(from, to, date, time)`.
-- `src/api.py` : `trainline_code` ajouté aux réponses `/v1/stations/search` ; objet `booking.{provider,url}` par trajet dans `/v1/journeys` (premier/dernier leg **non-marche**, ex. Paris → Besançon : `origin=FRPLY&destination=FRABG&outbound_date=2026-08-10&outbound_time=07:34`).
+- `src/trainline.py` : chargement CSV (cache), `slug_for(stop_area_id)` (accepte `StopArea:OCE…` / `OCE…`), `booking_url(from, to, date, time)`.
+- `src/api.py` : `trainline_slug` ajouté aux réponses `/v1/stations/search` ; objet `booking.{provider,url}` par **leg ferroviaire** dans `/v1/journeys` (trajets à correspondances décomposés — un billet TER par segment, marches exclues), ex. Paris → Besançon : `origin=paris-gare-de-lyon&destination=dijon-ville&outbound_date=2026-08-12&outbound_time=07:34` puis `origin=dijon-ville&destination=besancon-viotte&outbound_date=2026-08-12&outbound_time=11:09`.
 - `web/app.js` + `web/styles.css` : bouton « Voir les horaires & acheter sur Trainline » sur l'écran détail (lien `_blank`, classe `.buy-link`), affiché uniquement quand `j.booking.url` existe.
 
 ### Vérification
 
 ```bash
 curl -s "https://ter.zvz.fr/v1/journeys?from=OCE87686006&to=OCE87718007&date=2026-08-10&time=07:00&count=1"
-# booking: {provider: trainline, url: https://www.thetrainline.com/book/results?origin=FRPLY&destination=FRABG&outbound_date=2026-08-10&outbound_time=07:34}
+# booking per leg: {provider: trainline, url: https://www.thetrainline.com/book/results?origin=paris-gare-de-lyon&destination=dijon-ville&outbound_date=2026-08-12&outbound_time=07:34}
 .venv/bin/python -m unittest tests.test_api -v   # 21 tests OK
 ```
 
@@ -786,3 +787,58 @@ curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Lyon+Part+Dieu&date=2026-0
 ```
 
 Commit `5302a2a`, déployé et vérifié en prod le 11/08/2026.
+
+## 21. Correctif T8 — retards datés par date de service (11/08/2026)
+
+### Symptôme
+
+Une recherche `use_realtime=true` affichait un retard sur un train **dans deux
+jours** (ex. « +10 min » à J+2). Impossible a priori : un flux temps réel
+n'annonce que les trains qui circulent maintenant.
+
+### Cause racine
+
+- Le flux `sncf-gtfs-rt-trip-updates` annonce le retard d'une **course précise**,
+  identifiée par `TripDescriptor.start_date` (date de service réelle, YYYYMMDD —
+  observé : **976/976** entités TER avec `start_date`).
+- Le suffixe daté du `trip_id` SNCF (NewTripId, ex. `…:20261211`) **n'est pas la
+  date de service** : un même `trip_id` circule sur plusieurs jours (vérifié :
+  15 dates pour un trip, dont aujourd'hui **et** J+2).
+- Le parsing rangeait les retards **uniquement par `trip_id`** → le retard du jour
+  (start_date = aujourd'hui) s'appliquait à **toutes** les dates où le trip
+  circule, y compris J+2 et au-delà.
+
+### Correctif
+
+- `src/gtfs_rt.py` : `RealtimeFeed.trip_delays` et `.cancelled` indexés par
+  **`(trip_id, date_ymd)`** ; date dérivée de `TripDescriptor.start_date`, en
+  repli de l'horaire absolu (`time`) le plus précoce en Europe/Paris, sinon du
+  header du flux ; entité indatable ignorée (elle ne doit pas s'appliquer à
+  toutes les dates).
+- `src/raptor.py` : `_views` consulte `(trip.id, date)` pour retards et
+  suppressions ; `date` propagé dans `_pareto_journeys`/`_reconstruct` (le
+  décalage des horaires d'un leg est lui aussi daté).
+- Conséquence produit : un retard n'est affiché que **le jour de sa date de
+  service** — pas de prédiction de retard futur, pas de fuite entre dates.
+
+### Vérification
+
+- Feed réel : 208 retards + 8 suppressions, **100 % datés au 11/08/2026**
+  (avant correctif, les clés mêlaient des dates jusqu'en décembre).
+- Même train Lyon → Paris Bercy (trip `…:20260816`, service du 10 au 16/08) :
+  - 11/08 : départ 15:21, `delay_min: 5` (horaire réel décalé) ;
+  - 13/08 (J+2) : départ 15:16 (théorique), `delay_min: 0` — plus de retard.
+- Suite complète : **60 tests OK**. Commit `5061018`, déployé en prod (restart
+  `ter-finder.service`) ; `/v1/health` : `delayed_trips: 206, cancelled_trips: 8`.
+
+## 22. CI — correction du job release (11/08/2026)
+
+Le commit `4a56700` (AAB release signé Play Store) cassait le workflow : le `if`
+du job `release` référençait `secrets.KEYSTORE_BASE64`, **interdit par GitHub
+Actions dans une condition de job** → échec à 0 s de tous les runs (message
+générique « workflow file issue »). Correctif `.github/workflows/build-apk.yml` :
+le job `release` s'exécute toujours (sauf pull_request), une étape
+`Check keystore availability` lit `KEYSTORE_BASE64` via `env` et exporte
+`skip=true` si le secret est absent ; les étapes de décodage/signature/upload ne
+tournent que si `skip != true`. CI verte (APK debug buildé + release si secrets).
+

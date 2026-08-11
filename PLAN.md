@@ -364,7 +364,7 @@ erreur 400, et **résoudre la circulation à la date demandée** (§4.5).
 - **Service Alerts** (perturbations) : bandeau d'information.
 - Sépare en Tâche T8, ne bloque pas v1.
 
-**✅ Livré (T8, 11/08/2026).** Détails d'implémentation dans `walkthrough.md` §19–20 : flux Trip Updates (retards ≥ 0, suppressions CANCELED, mapping trip_id/stop, snapshot), flux Service Alerts (`sncf-gtfs-rt-service-alerts`, périodes actives, cibles stop `StopArea:OCE<uic8>` / numéro de train `OCESN?xxxF`, alertes générales comptées mais non affichées par trajet), API (`use_realtime`, `connection_risks`, `alerts` par trajet, section `realtime.alerts` dans `/v1/health`), UI (badges +X min, risque de correspondance, alternative +30 min, bandeau ⚠).
+**✅ Livré (T8, 11/08/2026).** Détails d'implémentation dans `walkthrough.md` §19–22 : flux Trip Updates (retards ≥ 0, suppressions CANCELED, mapping trip_id/stop, snapshot), flux Service Alerts (`sncf-gtfs-rt-service-alerts`, périodes actives, cibles stop `StopArea:OCE<uic8>` / numéro de train `OCESN?xxxF`, alertes générales comptées mais non affichées par trajet), API (`use_realtime`, `connection_risks`, `alerts` par trajet, section `realtime.alerts` dans `/v1/health`), UI (badges +X min, risque de correspondance, alternative +30 min, bandeau ⚠). Correctif 11/08 : retards/suppressions **datés par la date de service** (`TripDescriptor.start_date`) — sans datation, un retard du jour s'affichait aussi à J+2, car le suffixe daté du `trip_id` SNCF n'est pas sa date de circulation (§21).
 
 ## 11. Monétisation
 
@@ -608,7 +608,7 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T8 — Temps réel GTFS-RT (v2)
 
-**Statut : ✅ LIVRÉ et VALIDÉ le 11/08/2026** — module `src/gtfs_rt.py` (parsing des deux flux + poller daemon 2 min), application des retards/suppressions dans le moteur McRAPTOR, `use_realtime` sur `/v1/journeys`, section `realtime` dans `/v1/health`, badges de retard + alerte « correspondance manquée » avec alternative dans l'UI. **Service Alerts inclus** : parsing + mapping cibles (stop/numéro de train), `alerts` pertinentes par trajet, bandeau ⚠ dans l'UI, compteur dans `/v1/health`. Testé en prod (`ter.zvz.fr`).
+**Statut : ✅ LIVRÉ et VALIDÉ le 11/08/2026** — module `src/gtfs_rt.py` (parsing des deux flux + poller daemon 2 min), application des retards/suppressions dans le moteur McRAPTOR, `use_realtime` sur `/v1/journeys`, section `realtime` dans `/v1/health`, badges de retard + alerte « correspondance manquée » avec alternative dans l'UI. **Service Alerts inclus** : parsing + mapping cibles (stop/numéro de train), `alerts` pertinentes par trajet, bandeau ⚠ dans l'UI, compteur dans `/v1/health`. Testé en prod (`ter.zvz.fr`). **Correctif 11/08/2026 :** retards/suppressions datés par la date de service réelle (`TripDescriptor.start_date`) — le suffixe daté du `trip_id` SNCF n'est pas la date de circulation (un même trip_id circule sur plusieurs jours), sans datation un retard du jour s'affichait aussi à J+2. Voir `walkthrough.md` §21.
 
 **Objectif :** intégrer retards, suppressions et alertes (§10).
 
@@ -632,7 +632,7 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 **Livrables (études + PoC) :**
 - Récupérer les conditions des programmes partenaires SNCF Connect / Trainline (commission, URLs de deep-link avec paramètres gare/date/heure).
-- PoC : bouton « Voir les horaires & acheter sur Trainline » sur la page détail, générant une URL pré-remplie. **Livré :** module `src/trainline.py` (cartographie `uic8` → code Trainline depuis le repo officiel `trainline-eu/stations-studio`/`stations.csv`, 4000 gares mappées) ; l'API expose `trainline_code` dans `/v1/stations/search` et un objet `booking.{provider,url}` par trajet (`/book/results?origin=…&destination=…&outbound_date=…&outbound_time=…`, premier/dernier leg ferroviaire, marches exclues) ; bouton affiché quand le mapping existe. Sans paramètre d'affiliation pour l'instant.
+- PoC : bouton « Voir les horaires & acheter sur Trainline » sur la page détail, générant une URL pré-remplie. **Livré :** module `src/trainline.py` (cartographie `uic8` → slug Trainline depuis le repo officiel `trainline-eu/stations-studio`/`stations.csv`, 4000 gares mappées) ; l'API expose `trainline_slug` dans `/v1/stations/search` et un objet `booking.{provider,url}` par leg ferroviaire (`/book/results?origin={slug}&destination={slug}&outbound_date=…&outbound_time=…`, un billet TER par segment, marches exclues) ; bouton affiché quand le mapping existe. Format validé le 11/08/2026 en navigateur headless : seul le **slug** est accepté (les codes `sncf_id` FR… et les ids numériques sont rejetés par Trainline). Sans paramètre d'affiliation pour l'instant.
 - Ne jamais modifier l'ordre des résultats selon la commission.
 
 **Critères d'acceptation :** le lien d'affiliation est généré correctement ; le classement reste inchangé.
