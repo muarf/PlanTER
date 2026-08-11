@@ -713,9 +713,63 @@ flux GTFS-RT Trip Updates.
 curl -s https://ter.zvz.fr/v1/health | python3 -m json.tool   # realtime: {age_s, delayed_trips, cancelled_trips, fresh}
 curl -s "https://ter.zvz.fr/v1/journeys?from=Paris+Est&to=Strasbourg&date=2026-08-11&time=05:00&use_realtime=true&count=3"
 # leg K1 affiché avec delay_min: 20 ; un train supprimé ne génère plus d'itinéraire direct
-.venv/bin/python -m unittest tests.test_gtfs_rt tests.test_raptor tests.test_api -v  # 49 tests OK
+.venv/bin/python -m unittest tests.test_gtfs_rt tests.test_raptor tests.test_api -v  # 59 tests OK
 ```
 
 Redéploiement : `systemctl restart ter-finder.service` (deps venv déjà à jour :
 `gtfs-realtime-bindings 2.2.0`, `protobuf 7.35.1`), contrôle du vrai redémarrage
 via `ActiveEnterTimestamp` puis du premier fetch GTFS-RT.
+
+## 20. Exécution T8 — Service Alerts (perturbations) — 11/08/2026
+
+Complément T8 : le flux GTFS-RT **Service Alerts** (`sncf-gtfs-rt-service-alerts`)
+est intégré et affiché sous forme de bandeau de perturbation. Boucle le §10 du PLAN.
+
+### Flux et mapping
+
+- URL : `https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-service-alerts`
+  (~837 Ko, 348 entités sur le premier contrôle : 322 `only_trip`, 24 `both`,
+  2 `only_stop` ; causes MAINTENANCE 112, UNKNOWN_CAUSE 133, OTHER_CAUSE 103).
+- Deux cibles possibles dans `informed_entity` :
+  - `stop_id` = `StopArea:OCE<uic8>` → mappé directement sur `graph.stop_index`
+    (126 gares concernées, 100 % couvertes).
+  - `trip_id` = `OCESN17810F` (**numéro de train court**, sans date) → les trips
+    du graphe sont `OCESN117760F1187_F:…` ; mapping **par numéro de train** via
+    la regex `OCES(N?\d+)F`. 5860/6015 numéros d'alertes retrouvés dans les trips
+    du graphe (un numéro couvre plusieurs dates : même circulation quotidienne).
+- Période d'activité (`active_period`) : une alerte non bornée ou dont la période
+  englobe maintenant est active ; hors période = ignorée.
+- Décision de filtrage : alerte **générale** (aucune cible exploitable) → exclue
+  du bandeau par trajet (trop nombreuses, non ciblables — ex. guichets fermés,
+  infos confort), mais **comptée** dans `/v1/health` ; alerte par **gare** →
+  si le trajet y passe ; par **numéro de train** → si un leg ferroviaire du
+  trajet l'utilise.
+
+### Implémentation
+
+- `src/gtfs_rt.py` : `RealtimeAlert` (id, header, description tronquée à 200
+  car., cause, effect, cibles `stops`/`train_numbers`, `general`, `to_json()`),
+  `RealtimeAlerts` (`age_s()`, `snapshot()`, `relevant(stop_idxs, train_numbers,
+  include_general=False)`), `parse_service_alerts` (période + cibles),
+  `fetch_service_alerts` ; le poller fetch les **deux** flux indépendamment
+  (`alerts` et `feed`, chacun avec son log et sa conservation d'état).
+- `src/api.py` : champ `alerts` par trajet dans `/v1/journeys` (au plus 3,
+  calculé depuis les gares et numéros de train des legs ferroviaires) + section
+  `realtime.alerts` dans `/v1/health` (`count`, `fresh`, `age_s`).
+- UI : bandeau `⚠ Perturbation signalée : <titre>` dans résultats et détail,
+  bouton `Détail`/`Masquer` (élément `span` à l'écoute via délégation, pour ne
+  pas imbriquer un `<button>` dans le bouton de trajet).
+- Tests : 8 nouveaux cas Service Alerts (cible train/gare, générale, périodes
+  active/terminée/à venir, entrée sans header, pertinence croisée gare×train).
+
+### Vérification (prod)
+
+```bash
+curl -s https://ter.zvz.fr/v1/health | python3 -m json.tool
+# realtime.alerts: {count: 350, fresh: true, age_s: 1}
+curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Lyon+Part+Dieu&date=2026-08-11&time=08:00&use_realtime=true&count=5"
+# leg K7 08:49 → alerts: [Info Travaux (MAINTENANCE), Affluence été]
+.venv/bin/python -m unittest tests.test_gtfs_rt tests.test_raptor tests.test_api tests.golden_tests -v  # 59 tests OK
+```
+
+Commit `5302a2a`, déployé et vérifié en prod le 11/08/2026.

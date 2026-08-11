@@ -364,6 +364,8 @@ erreur 400, et **résoudre la circulation à la date demandée** (§4.5).
 - **Service Alerts** (perturbations) : bandeau d'information.
 - Sépare en Tâche T8, ne bloque pas v1.
 
+**✅ Livré (T8, 11/08/2026).** Détails d'implémentation dans `walkthrough.md` §19–20 : flux Trip Updates (retards ≥ 0, suppressions CANCELED, mapping trip_id/stop, snapshot), flux Service Alerts (`sncf-gtfs-rt-service-alerts`, périodes actives, cibles stop `StopArea:OCE<uic8>` / numéro de train `OCESN?xxxF`, alertes générales comptées mais non affichées par trajet), API (`use_realtime`, `connection_risks`, `alerts` par trajet, section `realtime.alerts` dans `/v1/health`), UI (badges +X min, risque de correspondance, alternative +30 min, bandeau ⚠).
+
 ## 11. Monétisation
 
 **Décision : l'outil est gratuit pour les utilisateurs.** Aucun paywall, aucun compte payant.
@@ -606,17 +608,17 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T8 — Temps réel GTFS-RT (v2)
 
-**Statut : ✅ LIVRÉ et VALIDÉ le 11/08/2026** — module `src/gtfs_rt.py` (parsing + poller daemon 2 min), application des retards/suppressions dans le moteur McRAPTOR, `use_realtime` sur `/v1/journeys`, section `realtime` dans `/v1/health`, badges de retard + alerte « correspondance manquée » avec alternative dans l'UI. Testé en prod (`ter.zvz.fr`).
+**Statut : ✅ LIVRÉ et VALIDÉ le 11/08/2026** — module `src/gtfs_rt.py` (parsing des deux flux + poller daemon 2 min), application des retards/suppressions dans le moteur McRAPTOR, `use_realtime` sur `/v1/journeys`, section `realtime` dans `/v1/health`, badges de retard + alerte « correspondance manquée » avec alternative dans l'UI. **Service Alerts inclus** : parsing + mapping cibles (stop/numéro de train), `alerts` pertinentes par trajet, bandeau ⚠ dans l'UI, compteur dans `/v1/health`. Testé en prod (`ter.zvz.fr`).
 
 **Objectif :** intégrer retards, suppressions et alertes (§10).
 
 **Livrables :**
-- Polling périodique de `sncf-gtfs-rt-trip-updates` (toutes les ~2 min).
+- Polling périodique de `sncf-gtfs-rt-trip-updates` et `sncf-gtfs-rt-service-alerts` (toutes les ~2 min).
 - Application des retards/suppressions sur le graphe en mémoire (recalcul d'itinéraires avec horaires réels).
 - Endpoint `/v1/journeys` avec paramètre `use_realtime=true`.
-- Affichage UI : retards, suppressions, « correspondance manquée » + proposition d'alternative.
+- Affichage UI : retards, suppressions, « correspondance manquée » + proposition d'alternative, bandeau perturbations.
 
-**Critères d'acceptation :** avec le flux réel branché, un trajet dont le train est retardé de 12 min s'affiche avec le retard ; un train supprimé ne génère plus d'itinéraire (ou génère une alternative).
+**Critères d'acceptation :** avec le flux réel branché, un trajet dont le train est retardé de 12 min s'affiche avec le retard ; un train supprimé ne génère plus d'itinéraire (ou génère une alternative) ; une perturbation ciblant une gare ou un train du trajet s'affiche en bandeau.
 
 **Dépendances :** T3, T5.
 
