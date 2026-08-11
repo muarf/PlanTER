@@ -302,6 +302,45 @@ class RaptorEngine:
             mirror=False, realtime=realtime,
         )
 
+    # ------------------------------------------------------------- DepartAfter (large)
+    def depart_after_wide(
+        self,
+        date: int,
+        origins: list[int],
+        dests: list[int],
+        t0: int,
+        max_transfers: int,
+        vehicle: str = "all",
+        realtime: Optional[object] = None,
+        slice_min: int = 180,
+    ) -> list[Journey]:
+        """RAPTOR « large » : RAPTOR classique ne garde que l'arrivée la plus
+        tôt par nombre de correspondances — un trajet rapide qui part tard est
+        éliminé comme dominé (départ+arrivée plus tardifs qu'un autre). En
+        relançant le balayage par tranches horaires depuis t0 (ici toutes les
+        `slice_min` min, horizon 36 h), on récupère les meilleurs trajets de
+        chaque tranche (y compris les rapides de fin de journée), dédupliqués.
+        Coût ~2-3× une passe simple ; résultats triés par (départ, arrivée)."""
+        views = self._views(date, vehicle, mirror=False, realtime=realtime)
+        rt = realtime.snapshot() if realtime is not None else None
+        seen: set[tuple] = set()
+        out: list[Journey] = []
+        for start in range(t0, t0 + HORIZON_MIN + 1, slice_min):
+            arr_by_round, round_parents, transfer_walk = self._rounds(
+                views, origins, dests, start, max_transfers, start + HORIZON_MIN
+            )
+            for j in self._pareto_journeys(
+                arr_by_round, round_parents, transfer_walk, origins, dests, start,
+                mirror=False, realtime=rt,
+            ):
+                key = (j.departure, j.arrival, j.transfers,
+                       tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(j)
+        return sorted(out, key=lambda j: (j.departure, j.arrival))
+
     # ------------------------------------------------------------- ArriveBy
     def arrive_by(
         self,
@@ -328,6 +367,44 @@ class RaptorEngine:
             arr_by_round, round_parents, transfer_walk, dests, origins, t0,
             mirror=True, realtime=realtime,
         )
+
+    # ------------------------------------------------------------- ArriveBy (large)
+    def arrive_by_wide(
+        self,
+        date: int,
+        origins: list[int],
+        dests: list[int],
+        deadline: int,
+        max_transfers: int,
+        vehicle: str = "all",
+        realtime: Optional[object] = None,
+        slice_min: int = 180,
+    ) -> list[Journey]:
+        """ArriveBy « large » : tranches horaires du temps renversé, équivalent
+        miroir de `depart_after_wide` (récupère les trajets rapides arrivant
+        avant la limite, mêmes si leur départ est tôt)."""
+        t0 = MAXT - deadline
+        views = self._views(date, vehicle, mirror=True, realtime=realtime)
+        rt = realtime.snapshot() if realtime is not None else None
+        seen: set[tuple] = set()
+        out: list[Journey] = []
+        # temps renversé : on scanne du plus tard (départ miroir le plus tôt)
+        # vers le plus tôt, en tranches.
+        for start in range(t0, MAXT + 1, slice_min):
+            arr_by_round, round_parents, transfer_walk = self._rounds(
+                views, dests, origins, start, max_transfers, MAXT
+            )
+            for j in self._pareto_journeys(
+                arr_by_round, round_parents, transfer_walk, dests, origins, start,
+                mirror=True, realtime=rt,
+            ):
+                key = (j.departure, j.arrival, j.transfers,
+                       tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(j)
+        return sorted(out, key=lambda j: (j.departure, j.arrival))
 
     # ------------------------------------------------------------- Pareto
     def _pareto_journeys(

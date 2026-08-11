@@ -104,7 +104,7 @@ class ApiTestCase(unittest.TestCase):
         # Aucun trajet TER en ≤3 correspondances -> 200 avec journeys vide (pas une erreur)
         r = self.client.get(
             "/v1/journeys",
-            params={"from": "Lyon Part Dieu", "to": "Lille Flandres", "date": DATE, "time": "07:00", "max_transfers": 3},
+            params={"from": "Hendaye", "to": "Strasbourg", "date": DATE, "time": "07:00", "max_transfers": 3},
         )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["journeys"], [])
@@ -202,6 +202,20 @@ class ApiTestCase(unittest.TestCase):
         js = self.client.get("/v1/journeys", params=q).json()["journeys"]
         durs = [j["duration_min"] for j in js]
         self.assertEqual(durs, sorted(durs))
+
+    # ---------------------------------------------------- recherche large (§20)
+    def test_recherche_large_trajets_de_fin_de_journee(self):
+        """RAPTOR simple ne garde que l'arrivée la plus tôt par nombre de
+        correspondances : à 08:00, un trajet rapide de 15h38 (5h) était masqué
+        par un plus long de 08:03. La recherche large le fait apparaître."""
+        q = {"from": "Mouchard", "to": "Paris Bercy", "date": DATE, "time": "08:00", "count": "20"}
+        js = self.client.get("/v1/journeys", params=q).json()["journeys"]
+        durs = sorted(j["duration_min"] for j in js)
+        # le trajet le plus rapide de la journée doit être < 5h30
+        self.assertLess(durs[0], 330)
+        # et il faut voir plus de 2 trajets (dont des départs de l'après-midi)
+        self.assertGreater(len(js), 2)
+        self.assertTrue(any(j["departure"][11:13] >= "14" for j in js))
 
     def test_connection_risks_detecte_retard_rongeant_la_marge(self):
         """T8 — une correspondance dont le retard a consommé la marge planifiée

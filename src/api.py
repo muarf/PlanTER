@@ -312,9 +312,9 @@ def journeys(
     realtime = _poller.snapshot() if (use_realtime and _poller is not None) else None
 
     if datetime_represents == "arrival":
-        journeys = engine.arrive_by(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+        journeys = engine.arrive_by_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
     else:
-        journeys = engine.depart_after(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+        journeys = engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
 
     # Tri : par départ (défaut) ou par durée (« le plus court de la journée » :
     # le moteur couvre un horizon de 36 h, le plus court figure donc parmi les
