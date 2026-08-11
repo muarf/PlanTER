@@ -674,3 +674,48 @@ Gares non mappées (peu fréquentes) : `booking.url` vaut `null`, pas de bouton.
 
 Phase 3 (T6 web) livrée et en ligne. Prochaine : **T7** (PWA puis mobile natif).
 Les déploiements web/API sont documentés en §13.
+
+## 19. Exécution T8 (temps réel GTFS-RT) — 11/08/2026
+
+T8 livrée : retards et suppressions SNCF intégrés au calcul d'itinéraires, via le
+flux GTFS-RT Trip Updates.
+
+### Flux et mapping
+
+- URL : `https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-trip-updates`
+  (maj toutes les ~2 min, horizon ~60 min). 833 Ko protobuf, ~765 trips TER mappés
+  exactement sur les trips du graphe (via `Graph.trip_index`, `trip_id` au même format).
+- `stop_id` du flux `StopPoint:OCETrain TER-<uic8>` → `StopArea:OCE<uic8>` :
+  **100 % des stops** mappés via `graph.stop_index`.
+- Décisions : retard ≥ 0 uniquement (un train en avance n'est jamais avancé) ;
+  délai max arr/dep par arrêt ; suppression via `TripDescriptor.CANCELED` ;
+  flux obsolète après ~6 min ; échec de fetch = l'état précédent est conservé.
+
+### Implémentation
+
+- `src/gtfs_rt.py` : `parse_trip_updates` (décodage protobuf → `RealtimeFeed`),
+  `RealtimePoller` (thread daemon, intervalle 120 s, verrou + `snapshot()`).
+- `src/raptor.py` : `_views` applique retards/cancels (cache contourné quand
+  `realtime` est fourni) ; `depart_after`/`arrive_by`/miroir propagent `realtime` ;
+  `_shift_leg` décale les horaires réels d'un leg (départ = retard à
+  l'embarquement, arrivée = retard au débarquement) et expose `Leg.delay_min`.
+- `src/api.py` : poller démarré avec le moteur (lifespan), paramètre
+  `use_realtime=true` sur `/v1/journeys`, section `realtime` dans `/v1/health`
+  (âge, fraîcheur, nb trips retardés/supprimés, timestamp GTFS-RT), alerte
+  `connection_risks` (jonction dont le retard a consommé la marge planifiée).
+- UI : checkbox « Temps réel (retards & suppressions) », badges `+X min` dans
+  résultats et détail, avertissement « correspondance risquée » + bouton
+  « Voir une alternative plus tard (+30 min) ».
+
+### Vérification (prod)
+
+```bash
+curl -s https://ter.zvz.fr/v1/health | python3 -m json.tool   # realtime: {age_s, delayed_trips, cancelled_trips, fresh}
+curl -s "https://ter.zvz.fr/v1/journeys?from=Paris+Est&to=Strasbourg&date=2026-08-11&time=05:00&use_realtime=true&count=3"
+# leg K1 affiché avec delay_min: 20 ; un train supprimé ne génère plus d'itinéraire direct
+.venv/bin/python -m unittest tests.test_gtfs_rt tests.test_raptor tests.test_api -v  # 49 tests OK
+```
+
+Redéploiement : `systemctl restart ter-finder.service` (deps venv déjà à jour :
+`gtfs-realtime-bindings 2.2.0`, `protobuf 7.35.1`), contrôle du vrai redémarrage
+via `ActiveEnterTimestamp` puis du premier fetch GTFS-RT.

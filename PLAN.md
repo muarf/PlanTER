@@ -606,6 +606,8 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T8 — Temps réel GTFS-RT (v2)
 
+**Statut : ✅ LIVRÉ et VALIDÉ le 11/08/2026** — module `src/gtfs_rt.py` (parsing + poller daemon 2 min), application des retards/suppressions dans le moteur McRAPTOR, `use_realtime` sur `/v1/journeys`, section `realtime` dans `/v1/health`, badges de retard + alerte « correspondance manquée » avec alternative dans l'UI. Testé en prod (`ter.zvz.fr`).
+
 **Objectif :** intégrer retards, suppressions et alertes (§10).
 
 **Livrables :**
