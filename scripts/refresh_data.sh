@@ -2,31 +2,88 @@
 # Re-télécharge le GTFS SNCF, re-filtre TER, reconstruit le graphe puis
 # redémarre le service API. En cas d'échec à n'importe quelle étape, on
 # conserve les données actuelles et le service reste en l'état (exit 1).
+#
+# Suivi : journal permanent reports/refresh.log + état machine-readable
+# data/refresh_status.json (couverture + statut) exposé par /v1/health.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PY=python3
-LOG() { echo "[refresh] $*"; }
+LOG() { echo "[$(date '+%F %T')] $*"; }
+log_to_journal() { LOG "$*" >> reports/refresh.log 2>/dev/null; }
+
+write_status() { # status coverage_start coverage_end
+  cat > data/refresh_status.json <<EOF
+{
+  "status": "$1",
+  "date": "$(date '+%Y-%m-%dT%H:%M:%S%z')",
+  "coverage_start": "$2",
+  "coverage_end": "$3"
+}
+EOF
+  chown ubuntu:ubuntu data/refresh_status.json 2>/dev/null || true
+}
+
+mkdir -p reports data
+
+COV_BEFORE=$($PY -c 'from pathlib import Path; from src.graph import Graph; g=Graph.load(Path("data/graph.bin")); print(f"{g.date_min} → {g.date_max}")' 2>/dev/null) || COV_BEFORE="?"
+log_to_journal "début du refresh (couverture actuelle : $COV_BEFORE)"
 
 LOG "1/5 téléchargement GTFS SNCF"
-$PY -m src.download || { LOG "ÉCHEC download — on garde les données actuelles"; exit 1; }
+if ! $PY -m src.download; then
+  log_to_journal "ÉCHEC 1/5 download — on garde les données actuelles"
+  write_status "error" "" ""; exit 1
+fi
 
 LOG "2/5 filtrage TER"
-$PY -m src.filter_ter || { LOG "ÉCHEC filter — on garde les données actuelles"; exit 1; }
+if ! $PY -m src.filter_ter; then
+  log_to_journal "ÉCHEC 2/5 filter — on garde les données actuelles"
+  write_status "error" "" ""; exit 1
+fi
 
 LOG "3/5 validation"
-$PY -m src.validate_ter || { LOG "ÉCHEC validation — on garde les données actuelles"; exit 1; }
+if ! $PY -m src.validate_ter; then
+  log_to_journal "ÉCHEC 3/5 validation — on garde les données actuelles"
+  write_status "error" "" ""; exit 1
+fi
 
 LOG "4/5 build du graphe (sauvegarde de l'ancien)"
 cp -f data/graph.bin data/graph.bin.prev 2>/dev/null || true
-$PY -m src.build_graph \
+if ! $PY -m src.build_graph \
     --input data/ter/gtfs_ter.zip --output data/graph.bin \
-    --interchange config/interchange.yaml --paris-links config/paris_links.yaml \
-    || { LOG "ÉCHEC build — rollback du graphe précédent"; cp -f data/graph.bin.prev data/graph.bin 2>/dev/null; exit 1; }
+    --interchange config/interchange.yaml --paris-links config/paris_links.yaml; then
+  log_to_journal "ÉCHEC 4/5 build — rollback du graphe précédent"
+  cp -f data/graph.bin.prev data/graph.bin 2>/dev/null || true
+  write_status "error" "" ""; exit 1
+fi
 
 chown -R ubuntu:ubuntu data reports 2>/dev/null || true
 
 LOG "5/5 redémarrage du service API"
-systemctl restart ter-finder.service
+START_BEFORE=$(systemctl show -p ActiveEnterTimestamp --value ter-finder.service 2>/dev/null || true)
+if ! systemctl restart ter-finder.service; then
+  log_to_journal "ALERTE : systemctl restart ter-finder.service a échoué"
+  write_status "degraded" "" ""
+  exit 1
+fi
+
+# Health-check : l'API doit répondre ET avoir effectivement redémarré (sinon
+# l'ancien graphe reste servi en mémoire).
+OK=""
+for i in 1 2 3 4 5; do
+  sleep 2
+  START_AFTER=$(systemctl show -p ActiveEnterTimestamp --value ter-finder.service 2>/dev/null || true)
+  if [ -n "$START_AFTER" ] && [ "$START_AFTER" != "$START_BEFORE" ] \
+     && curl -sf "http://127.0.0.1:8000/v1/health" >/dev/null 2>&1; then
+    OK=1; break
+  fi
+done
+if [ -z "$OK" ]; then
+  log_to_journal "ALERTE : service API injoignable ou non redémarré après refresh"
+  write_status "degraded" "" ""
+  exit 1
+fi
 
 COV=$($PY -c 'from pathlib import Path; from src.graph import Graph; g=Graph.load(Path("data/graph.bin")); print(f"{g.date_min} → {g.date_max}")' 2>/dev/null) || COV="?"
 LOG "OK — nouvelle couverture : $COV"
+log_to_journal "OK — refresh réussi : $COV_BEFORE → $COV"
+write_status "ok" "${COV% → *}" "${COV#*→ }"
