@@ -228,12 +228,13 @@ def health() -> dict:
 
 
 def _realtime_health() -> dict | None:
-    """T8 — état du flux GTFS-RT : fraîcheur (âge en s), nombre de trips
-    retardés/supprimés, horodatage GTFS-RT. None si le poller n'est pas actif."""
+    """T8 — état des flux GTFS-RT : fraîcheur (âge en s), nombre de trips
+    retardés/supprimés, alertes, horodatages. None si le poller n'est pas actif."""
     global _poller
     if _poller is None:
         return None
     feed = _poller.snapshot()
+    alerts = _poller.alerts_snapshot()
     return {
         "polling": feed.fetched_at > 0,
         "age_s": feed.age_s(),
@@ -243,6 +244,11 @@ def _realtime_health() -> dict | None:
         "gtfs_rt_timestamp": _dt.datetime.fromtimestamp(feed.updated_at, tz=_dt.timezone.utc).isoformat()
         if feed.updated_at
         else None,
+        "alerts": {
+            "count": len(alerts.alerts),
+            "fresh": 0 <= alerts.age_s() <= 6 * 60 if alerts.fetched_at else False,
+            "age_s": alerts.age_s(),
+        },
     }
 
 
@@ -321,6 +327,9 @@ def journeys(
         return t[:10], (t[11:16] or None)
 
     out = []
+    # T8 — alertes Service Alerts : pertinentes si une gare ou un train du trajet
+    # est touché. On expose au plus 3 (les alertes générales restent dans health).
+    alerts_feed = _poller.alerts_snapshot() if (_poller is not None) else None
     for j in journeys:
         jd = _bare_journey(j.to_json(d))
         bookable = 0
@@ -342,8 +351,35 @@ def journeys(
         # T8 — correspondances à risque (retard réel menaçant la jonction).
         if realtime is not None:
             jd["connection_risks"] = _connection_risks(jd)
+        # T8 — perturbations du trajet (Service Alerts).
+        if alerts_feed is not None:
+            jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
         out.append(jd)
     return {"journeys": out}
+
+
+def _journey_alerts(alerts, j, g) -> list:
+    """Alertes pertinentes d'un trajet : gares des legs (marche exclue) et
+    numéros de train des legs ferroviaires."""
+    stop_idxs: list[int] = []
+    train_numbers: list[str] = []
+    for leg in j.legs:
+        if leg.type == "walk":
+            continue
+        idx = g.stop_index.get(leg.from_id)
+        if idx is not None:
+            stop_idxs.append(idx)
+        idx = g.stop_index.get(leg.to_id)
+        if idx is not None:
+            stop_idxs.append(idx)
+        m = gtfs_rt._TRAIN_NO_RE.match(leg.trip_id)
+        if m:
+            train_numbers.append(m.group(1))
+    return alerts.relevant(stop_idxs, train_numbers)
+
+
+def _alert_json(a) -> dict:
+    return a.to_json()
 
 
 class _ShellStaticFiles(StaticFiles):

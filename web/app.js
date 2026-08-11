@@ -129,6 +129,17 @@ function riskNote(j) {
     `${n > 1 ? ` et ${n - 1} autre(s)` : ""}. Retard déjà consommé sur la marge planifiée.</div>`;
 }
 
+function alertsNote(j) {
+  if (!j.alerts || !j.alerts.length) return "";
+  const head = j.alerts[0].header;
+  const n = j.alerts.length;
+  return `<div class="connection-risk alert-note">⚠ Perturbation signalée : <strong>${head}</strong>` +
+    `${n > 1 ? ` (et ${n - 1} autre${n > 2 ? "s" : ""})` : ""}` +
+    `<span class="alert-toggle" role="button" tabindex="0">Détail</span><div class="alert-details" hidden>` +
+    j.alerts.map((a) => `<div class="alert-item"><strong>${a.header}</strong><p>${a.description}</p></div>`).join("") +
+    `</div></div>`;
+}
+
 function renderJourneys(journeys) {
   resultsSection.removeAttribute("hidden");
   journeysList.innerHTML = "";
@@ -153,6 +164,7 @@ function renderJourneys(journeys) {
         · ${j.transfers} correspondance(s) · ${lines}${badges}
       </div>
       ${riskNote(j)}
+      ${alertsNote(j)}
       ${j.booking && j.booking.tickets
         ? `<div class="ticket-links">${j.legs.filter((l) => l.booking && l.booking.url)
             .map((l) => `<a class="ticket-chip" href="${l.booking.url}" target="_blank" rel="noopener noreferrer">Billet ${l.line || "trajet"} · Trainline</a>`)
@@ -176,6 +188,7 @@ function showDetail(j, withAlternative) {
     <p class="journey-meta">Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
       · ${j.transfers} correspondance(s)</p>
     ${riskNote(j)}
+    ${alertsNote(j)}
     ${alt}
     <ol class="timeline"></ol>`;
   const timeline = detailBody.querySelector(".timeline");
@@ -287,3 +300,13 @@ if ("serviceWorker" in navigator) {
     }).catch(() => {});
   });
 }
+
+/* ------------------------------------------------------------- événements (délégués) */
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest(".alert-toggle");
+  if (!t) return;
+  ev.stopPropagation();
+  const box = t.nextElementSibling;
+  box.toggleAttribute("hidden");
+  t.textContent = box.hidden ? "Détail" : "Masquer";
+});

@@ -110,6 +110,16 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
   color: #fff; font-size: 0.85rem; font-weight: 600; cursor: pointer;
 }
 .alt-button:hover { opacity: 0.9; }
+.alert-note { background: #eef3ff; border-color: #b9c6e6; color: #27408c; }
+.alert-note .alert-toggle {
+  display: inline-block; margin-left: 0.5rem; padding: 0.1rem 0.4rem;
+  border: 1px solid #b9c6e6; border-radius: 4px; color: #27408c;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer; user-select: none;
+}
+.alert-note .alert-toggle:hover { background: #dfe7ff; }
+.alert-note .alert-details { margin-top: 0.4rem; border-top: 1px dashed #b9c6e6; padding-top: 0.4rem; }
+.alert-note .alert-item + .alert-item { margin-top: 0.35rem; }
+.alert-note .alert-item p { margin: 0.15rem 0 0; font-size: 0.8rem; }
 
 /* ------------------------------------------------------------------- détail */
 #detail-body { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }

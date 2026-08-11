@@ -135,5 +135,141 @@ class GtfsRtTestCase(unittest.TestCase):
         self.assertFalse(feed.is_fresh)
 
 
+class ServiceAlertsTestCase(unittest.TestCase):
+    """T8 — Parsing Service Alerts : cibles (stop/train/général), période,
+    traduction, pertinence pour un trajet."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.g = Graph.load(DATA)
+        cls._trip = cls._real_trip(cls.g)
+
+    @staticmethod
+    def _real_trip(g):
+        """Un trip réel du graphe (numéro de train exploitable)."""
+        for tidx in g.active_trip_indices(20260810):
+            t = g.trips[tidx]
+            if t.stop_times and len(t.stop_times) > 2:
+                return t
+        raise AssertionError("aucun trip de test")
+
+    def _alert(self, entity_id="a1", trip_id=None, stop_id=None,
+               cause=_pb2.Alert.MAINTENANCE, start=None, end=None):
+        fm = _feed_message()
+        e = fm.entity.add()
+        e.id = entity_id
+        e.alert.header_text.translation.add(language="fr", text="Travaux en cours")
+        e.alert.description_text.translation.add(language="fr", text="Des travaux ont lieu <b>ici</b>.")
+        if trip_id:
+            e.alert.informed_entity.add().trip.trip_id = trip_id
+        if stop_id:
+            e.alert.informed_entity.add().stop_id = stop_id
+        e.alert.cause = cause
+        if start is not None:
+            p = e.alert.active_period.add()
+            p.start = start
+            if end is not None:
+                p.end = end
+        elif end is not None:
+            e.alert.active_period.add().end = end
+        return fm
+
+    def test_alerte_par_train(self):
+        """Une alerte ciblée sur un numéro de train (sans date) est retenue,
+        avec le numéro extrait du trip_id."""
+        trip = self._trip
+        m = gtfs_rt._TRAIN_NO_RE.match(trip.id)
+        self.assertIsNotNone(m, f"trip_id inattendu : {trip.id}")
+        fm = self._alert(trip_id=trip.id)
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 1)
+        a = feed.alerts[0]
+        self.assertFalse(a.general)
+        self.assertIn(m.group(1), a.train_numbers)
+        self.assertIn("Travaux", a.header)
+        self.assertNotIn("<b>", a.description)
+
+    def test_alerte_par_stop_mappe(self):
+        """Une alerte ciblée sur un stop_id du graphe (StopArea:OCE<uic8>)
+        est retenue avec son stop_idx."""
+        trip = self._trip
+        uic = trip.stop_times[0].stop
+        stop = self.g.stops[uic]
+        fm = self._alert(stop_id=stop.id)
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 1)
+        self.assertIn(uic, feed.alerts[0].stops)
+
+    def test_alerte_generale(self):
+        """Une alerte sans informed_entity est générale (toutes lignes)."""
+        fm = self._alert()
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 1)
+        self.assertTrue(feed.alerts[0].general)
+
+    def test_periode_hors_activite_ignoree(self):
+        """Une alerte hors de sa période d'activité est ignorée."""
+        import time
+
+        now = int(time.time())
+        fm = self._alert(start=now - 3600, end=now - 1800)
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 0)
+
+    def test_periode_bornee_active(self):
+        """Une alerte dont la période englobe maintenant est retenue."""
+        import time
+
+        now = int(time.time())
+        fm = self._alert(start=now - 3600, end=now + 3600)
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 1)
+
+    def test_alerte_commence_apres(self):
+        """Une alerte à venir (start futur) n'est pas encore active."""
+        import time
+
+        now = int(time.time())
+        fm = self._alert(start=now + 3600)
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 0)
+
+    def test_sans_header_ignore(self):
+        """Une entrée sans header_text est ignorée (feed annexe)."""
+        fm = _feed_message()
+        e = fm.entity.add()
+        e.id = "x"
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+        self.assertEqual(len(feed.alerts), 0)
+
+    def test_relevant_par_train_et_gare(self):
+        """relevant() croise les gares et numéros de train du trajet."""
+        trip = self._trip
+        m = gtfs_rt._TRAIN_NO_RE.match(trip.id)
+        stop0 = trip.stop_times[0].stop
+        # une alerte sur notre train + une sur notre gare + une générale
+        fm = _feed_message()
+        e = fm.entity.add()
+        e.id = "a-train"
+        e.alert.header_text.translation.add(language="fr", text="Train")
+        e.alert.informed_entity.add().trip.trip_id = trip.id
+        e = fm.entity.add()
+        e.id = "a-stop"
+        e.alert.header_text.translation.add(language="fr", text="Gare")
+        e.alert.informed_entity.add().stop_id = self.g.stops[stop0].id
+        e = fm.entity.add()
+        e.id = "a-general"
+        e.alert.header_text.translation.add(language="fr", text="Générale")
+        feed = gtfs_rt.parse_service_alerts(fm.SerializeToString(), self.g)
+
+        rel = feed.relevant([stop0], [m.group(1)])
+        self.assertEqual({a.id for a in rel}, {"a-train", "a-stop"})
+        # sans general, l'alerte générale n'apparaît pas
+        with_general = feed.relevant([stop0], [m.group(1)], include_general=True)
+        self.assertEqual({a.id for a in with_general}, {"a-train", "a-stop", "a-general"})
+        # autre gare / autre train -> rien
+        self.assertEqual(feed.relevant([], ["ZZZZ"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
