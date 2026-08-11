@@ -277,7 +277,7 @@ python3 -m src.raptor --from "Paris Gare de Lyon" --to "Besançon Viotte" --date
 #       11:09 Dijon [C11 N894213] -> 12:04 Besançon Viotte
 ```
 
-Options : `--mode arrive` (ArriveBy), `--max-transfers` (0–3), `--vehicle train_only`,
+Options : `--mode arrive` (ArriveBy), `--max-transfers` (0–6), `--vehicle train_only`,
 `--json` (sortie structurée §6.5).
 
 ### Résultats de référence (2026-08-10)
@@ -425,7 +425,7 @@ curl "localhost:8000/v1/health"
 - `GET /v1/journeys` : `from`/`to` acceptent un `stop_area_id` nu ou préfixé
   `StopArea:`, des coordonnées « lat,lon » (gare la plus proche), un nom de gare
   ou un groupe (« Paris ») ; `datetime_represents=departure|arrival`,
-  `max_transfers=0..3`, `vehicle=all|train_only`, `count=1..20`.
+  `max_transfers=0..6`, `vehicle=all|train_only`, `count=1..20`.
 - Erreurs : 404 `STATION_NOT_FOUND` (+ suggestions), 400 `INVALID_DATE` (format ou
   hors plage `2026-08-09 → 2026-12-19`) / `INVALID_TIME`, 422 paramètres hors
   domaine, 200 `{ journeys: [] }` si aucun trajet.

@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope, Receive, Send
 
 from src.graph import Graph, ALIASES
 from src.raptor import RaptorEngine
@@ -194,7 +195,7 @@ def journeys(
     date: str = Query(..., description="Date du voyage (YYYY-MM-DD)"),
     time: str = Query(..., description="Heure de référence (HH:MM)"),
     datetime_represents: str = Query("departure", pattern="^(departure|arrival)$"),
-    max_transfers: int = Query(3, ge=0, le=3),
+    max_transfers: int = Query(6, ge=0, le=6),
     vehicle: str = Query("all", pattern="^(all|train_only)$"),
     count: int = Query(5, ge=1, le=20),
 ) -> dict:
@@ -246,9 +247,29 @@ def journeys(
     return {"journeys": out}
 
 
+class _ShellStaticFiles(StaticFiles):
+    """Fichiers du shell (html/css/js/sw) : pas de cache navigateur, pour que
+    les correctifs (ex. date par défaut) soient pris dès le prochain rechargement
+    sans rejouer une ancienne version depuis le cache heuristique."""
+    _NO_CACHE = {"/", "/app.js", "/sw.js", "/index.html"}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope["path"]
+        if path in self._NO_CACHE:
+            async def _send(message: dict) -> None:
+                if message["type"] == "http.response.start":
+                    headers = [h for h in message.get("headers", []) if h[0].lower() != b"cache-control"]
+                    headers.append((b"cache-control", b"no-cache"))
+                    message["headers"] = headers
+                await send(message)
+            await super().__call__(scope, receive, _send)
+        else:
+            await super().__call__(scope, receive, send)
+
+
 # SPA T6 (§8) : servie par l'API elle-même — un seul point d'entrée, pas de CORS.
 # Les routes /v1/* étant déclarées avant, elles restent prioritaires.
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+app.mount("/", _ShellStaticFiles(directory=WEB_DIR, html=True), name="web")
 
 
 if __name__ == "__main__":

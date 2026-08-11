@@ -43,22 +43,15 @@
           <input id="date" name="date" type="date" required>
         </div>
         <div class="field">
-          <label for="time">Heure</label>
-          <input id="time" name="time" type="time" value="08:00" required>
-        </div>
-        <fieldset class="field fieldset">
-          <legend>Sens</legend>
-          <label class="radio"><input type="radio" name="datetime_represents" value="departure" checked> Départ</label>
-          <label class="radio"><input type="radio" name="datetime_represents" value="arrival"> Arrivée</label>
-        </fieldset>
-        <div class="field">
-          <label for="max_transfers">Correspondances max</label>
-          <select id="max_transfers" name="max_transfers">
-            <option value="3" selected>3</option>
-            <option value="2">2</option>
-            <option value="1">1</option>
-            <option value="0">0 (direct)</option>
-          </select>
+          <span class="field-label" id="sens-label">Sens</span>
+          <div class="time-row">
+            <div class="sens-inline" role="radiogroup" aria-labelledby="sens-label">
+              <label class="radio"><input type="radio" name="datetime_represents" value="departure" checked> Départ</label>
+              <label class="radio"><input type="radio" name="datetime_represents" value="arrival"> Arrivée</label>
+            </div>
+            <label for="time" class="visually-hidden">Heure</label>
+            <input id="time" name="time" type="time" value="08:00" required>
+          </div>
         </div>
         <div class="field">
           <label class="checkbox"><input type="checkbox" name="vehicle" value="train_only"> Trains uniquement (sans cars TER)</label>

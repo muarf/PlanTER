@@ -31,7 +31,10 @@ function initDateRange() {
       const d = $("#date");
       d.min = h.coverage_start;
       d.max = h.coverage_end;
-      d.value = h.coverage_start;
+      const today = new Date();
+      const iso = today.toISOString().slice(0, 10);
+      d.value = iso < h.coverage_start ? h.coverage_start
+        : iso > h.coverage_end ? h.coverage_end : iso;
     })
     .catch(() => {});
 }
@@ -195,7 +198,6 @@ form.addEventListener("submit", async (e) => {
     date: $("#date").value,
     time: $("#time").value,
     datetime_represents: form.elements.datetime_represents.value,
-    max_transfers: $("#max_transfers").value,
     vehicle: form.elements.vehicle.checked ? "train_only" : "all",
     count: "5",
   });

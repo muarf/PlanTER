@@ -41,10 +41,12 @@ main { max-width: 44rem; margin: 0 auto; padding: 1rem; }
 #search-form { display: grid; gap: 0.85rem; background: var(--card);
   border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
 .field { display: flex; flex-direction: column; gap: 0.25rem; position: relative; }
-.fieldset { border: 0; padding: 0; margin: 0; }
-.fieldset legend { font-weight: 600; margin-bottom: 0.25rem; }
 label { font-weight: 600; font-size: 0.9rem; }
+.field-label { font-weight: 600; font-size: 0.9rem; }
 .radio, .checkbox { font-weight: 400; display: flex; align-items: center; gap: 0.35rem; }
+.time-row { display: flex; align-items: center; gap: 1rem; }
+.sens-inline { display: flex; gap: 1rem; white-space: nowrap; }
+.time-row input[type="time"] { width: 8rem; }
 input[type="text"], input[type="date"], input[type="time"], select {
   padding: 0.55rem 0.6rem; border: 1px solid var(--border); border-radius: 8px;
   font-size: 1rem; background: #fff; color: var(--fg); width: 100%;
@@ -113,7 +115,6 @@ footer a { color: var(--ter-dark); }
 
 @media (min-width: 640px) {
   #search-form { grid-template-columns: 1fr 1fr; }
-  #search-form .fieldset { grid-column: 1 / -1; }
   #search-form button { grid-column: 1 / -1; }
 }
 

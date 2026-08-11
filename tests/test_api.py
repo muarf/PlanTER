@@ -99,13 +99,25 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(j["legs"][0]["from"]["name"], "Paris Est")
 
     def test_journeys_aucun_resultat(self):
-        # Aucun trajet TER -> 200 avec journeys vide (pas une erreur)
+        # Aucun trajet TER en ≤3 correspondances -> 200 avec journeys vide (pas une erreur)
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Lyon Part Dieu", "to": "Lille Flandres", "date": DATE, "time": "07:00", "max_transfers": 3},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["journeys"], [])
+
+    def test_journeys_plus_de_3_correspondances(self):
+        # Le défaut max_transfers=6 permet au moteur de proposer des trajets à
+        # 4+ correspondances quand c'est la seule option à cette heure (retour
+        # utilisateur : plus de limite 0-3, le moteur choisit lui-même).
         r = self.client.get(
             "/v1/journeys",
             params={"from": "Lyon Part Dieu", "to": "Lille Flandres", "date": DATE, "time": "07:00"},
         )
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["journeys"], [])
+        j = r.json()["journeys"][0]
+        self.assertGreater(j["transfers"], 3)
 
     def test_journeys_marche_inter_gares(self):
         r = self.client.get(
@@ -184,7 +196,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.json()["error"]["code"], "INVALID_TIME")
 
     def test_parametres_invalides_422(self):
-        # max_transfers hors 0..3 et vehicle invalide sont rejetés par FastAPI
+        # max_transfers hors 0..6 et vehicle invalide sont rejetés par FastAPI
         r = self.client.get(
             "/v1/journeys",
             params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00", "max_transfers": 9},

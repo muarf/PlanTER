@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", required=True)
     parser.add_argument("--time", default="08:00")
     parser.add_argument("--mode", choices=["depart", "arrive"], default="depart")
-    parser.add_argument("--max-transfers", type=int, default=3)
+    parser.add_argument("--max-transfers", type=int, default=6)
     parser.add_argument("--vehicle", choices=["all", "train_only"], default="all")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)

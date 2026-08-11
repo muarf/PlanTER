@@ -296,7 +296,7 @@ GET /v1/journeys
     &date=YYYY-MM-DD
     &time=HH:MM
     &datetime_represents=departure|arrival     (défaut: departure)
-    &max_transfers=0|1|2|3                     (défaut: 3)
+    &max_transfers=0..6                         (défaut: 6)
     &vehicle=all|train_only                    (défaut: all)
     &count=<nb max de trajets retournés>       (défaut: 5)
     → { journeys: [Journey] }                   (§6.5)
@@ -315,7 +315,7 @@ GET /v1/health
 
 ```
 GET /v1/journeys?from=OCE87686006&to=OCE87718007
-    &date=2026-08-10&time=07:00&max_transfers=3
+    &date=2026-08-10&time=07:00&max_transfers=6
 → doit retourner au moins un trajet Paris Gare de Lyon → Dijon → Besançon Viotte, 1 correspondance.
 ```
 
@@ -335,7 +335,7 @@ erreur 400, et **résoudre la circulation à la date demandée** (§4.5).
 1. **Accueil / recherche** :
    - Champs « De » et « À » avec autocomplete (endpoint `/v1/stations/search`).
    - Date + heure, sens (départ / arrivée).
-   - Limite de correspondances (0–3), filtre « Trains uniquement ».
+   - Filtre « Trains uniquement » (les correspondances sont proposées automatiquement, jusqu'à 6).
    - Bouton rechercher.
 2. **Résultats** :
    - Liste des trajets Pareto triés par heure de départ.
@@ -464,7 +464,7 @@ le cas canonique `Paris Gare de Lyon → Besançon Viotte` est trouvé en 1 chan
 **Livrables :**
 - Implémentation **McRAPTOR** : rounds, marquage des arrêts mis à jour, balayage des trips par route, backpointers, reconstruction des legs.
 - Modes **DepartAfter** et **ArriveBy**.
-- Limite `max_transfers` (0–3).
+- Limite `max_transfers` (0–6).
 - Gestion des services de nuit / fenêtre de recherche (§6.4).
 - Filtre `vehicle=all|train_only` (exclut `OCECar TER` et `OCETramTrain` si demandé).
 - Objet `Journey` sérialisable au format JSON de §6.5.
