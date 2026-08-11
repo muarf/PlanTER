@@ -77,6 +77,14 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 .card h2 { margin-top: 0; font-size: 1.05rem; }
 
 /* ---------------------------------------------------------------- résultats */
+.sort-row { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.7rem; }
+.sort-label { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.sort-button {
+  padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 20px;
+  background: #fff; color: var(--fg); font-size: 0.85rem; cursor: pointer;
+}
+.sort-button:hover { border-color: var(--ter); }
+.sort-button.active { background: var(--ter); color: #fff; border-color: var(--ter); }
 .journeys { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.7rem; }
 .journeys button.journey {
   width: 100%; text-align: left; background: var(--card);

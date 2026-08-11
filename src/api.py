@@ -295,6 +295,8 @@ def journeys(
     max_transfers: int = Query(6, ge=0, le=6),
     vehicle: str = Query("all", pattern="^(all|train_only)$"),
     count: int = Query(5, ge=1, le=20),
+    sort: str = Query("departure", pattern="^(departure|duration)$",
+                      description="Tri des résultats : departure (heure de départ, défaut) ou duration (le plus court d'abord)"),
     use_realtime: bool = Query(False, description="T8 — appliquer les retards/suppressions GTFS-RT"),
 ) -> dict:
     engine = get_engine()
@@ -314,7 +316,13 @@ def journeys(
     else:
         journeys = engine.depart_after(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
 
-    journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]
+    # Tri : par départ (défaut) ou par durée (« le plus court de la journée » :
+    # le moteur couvre un horizon de 36 h, le plus court figure donc parmi les
+    # solutions Pareto si on trie par durée avant la troncature à `count`).
+    if sort == "duration":
+        journeys = sorted(journeys, key=lambda j: (j.duration_min, j.departure, j.arrival))[:count]
+    else:
+        journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]
 
     # T9 — liens Trainline PAR BILLET (PoC monétisation). Les billets TER se
     # vendent séparément par segment : une URL de réservation est générée pour

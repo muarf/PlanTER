@@ -248,7 +248,8 @@ async function search(timeShiftMin = 0) {
     time: time,
     datetime_represents: form.elements.datetime_represents.value,
     vehicle: form.elements.vehicle.checked ? "train_only" : "all",
-    count: "5",
+    sort: sortBy,
+    count: sortBy === "duration" ? "10" : "5",
   });
   if (form.elements.realtime.checked) params.set("use_realtime", "true");
 
@@ -267,6 +268,7 @@ async function search(timeShiftMin = 0) {
     lastJourneys = body.journeys;
     detailSection.setAttribute("hidden", "");
     renderJourneys(lastJourneys);
+    setSortButtons();
     resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     searchError.textContent = "Impossible de contacter l'API.";
@@ -276,6 +278,20 @@ async function search(timeShiftMin = 0) {
     searchButton.textContent = "Rechercher";
   }
 }
+
+let sortBy = "departure";
+function setSortButtons() {
+  $("#sort-departure").classList.toggle("active", sortBy === "departure");
+  $("#sort-duration").classList.toggle("active", sortBy === "duration");
+}
+$("#sort-departure").addEventListener("click", () => {
+  sortBy = "departure";
+  search();
+});
+$("#sort-duration").addEventListener("click", () => {
+  sortBy = "duration";
+  search();
+});
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();

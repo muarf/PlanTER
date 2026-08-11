@@ -184,6 +184,25 @@ class ApiTestCase(unittest.TestCase):
         j = r.json()["journeys"][0]
         self.assertEqual(j["legs"][0]["delay_min"], 0)
 
+    # --------------------------------------------------- tri par durée (§20)
+    def test_sort_duration_le_plus_court_en_premier(self):
+        """sort=duration : la durée ne décroît pas, et la liste n'est pas triée
+        par départ (le plus court de la journée peut partir plus tard)."""
+        q = {"from": "Paris Est", "to": "Strasbourg", "date": DATE, "time": "08:00", "count": "5"}
+        by_dep = self.client.get("/v1/journeys", params={**q, "sort": "departure"}).json()["journeys"]
+        by_dur = self.client.get("/v1/journeys", params={**q, "sort": "duration"}).json()["journeys"]
+        self.assertEqual(by_dur, sorted(by_dur, key=lambda j: j["duration_min"]))
+        # le premier par durée est au moins aussi rapide que le premier par départ
+        self.assertLessEqual(by_dur[0]["duration_min"], by_dep[0]["duration_min"])
+
+    def test_sort_duration_reste_ordonne_par_egalite(self):
+        """sort=duration : à durée égale, les départs restent triés."""
+        q = {"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00", "count": "5",
+             "sort": "duration"}
+        js = self.client.get("/v1/journeys", params=q).json()["journeys"]
+        durs = [j["duration_min"] for j in js]
+        self.assertEqual(durs, sorted(durs))
+
     def test_connection_risks_detecte_retard_rongeant_la_marge(self):
         """T8 — une correspondance dont le retard a consommé la marge planifiée
         est signalée (connection_risks) ; absente sans temps réel."""
