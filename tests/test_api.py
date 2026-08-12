@@ -403,6 +403,9 @@ class WebTestCase(unittest.TestCase):
         self.assertIn('id="to"', html)
         # T8 — les retards/suppressions sont appliqués d'office, pas d'option dans le formulaire
         self.assertNotIn('name="realtime"', html)
+        # T11 — le champ cartes a été retiré (Trainline n'applique pas la carte via l'URL) ;
+        # la logique serveur (param cards=, /v1/cards) reste disponible pour plus tard.
+        self.assertNotIn("cards-field", html)
 
     def test_assets_servis(self):
         self.assertEqual(self.client.get("/styles.css").status_code, 200)

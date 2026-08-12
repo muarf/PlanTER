@@ -62,21 +62,6 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 .suggestions li { padding: 0.55rem 0.6rem; cursor: pointer; }
 .suggestions li:hover, .suggestions li[aria-selected="true"] { background: #e6f4f0; }
 
-/* ------------------------------------- cartes de réduction (T11) */
-.cards-select {
-  border: 1px solid var(--border); border-radius: 8px; max-height: 10rem;
-  overflow-y: auto; background: #fff;
-}
-.cards-select ul { list-style: none; margin: 0; padding: 0; }
-.cards-select li { padding: 0.45rem 0.6rem; display: flex; align-items: center; gap: 0.5rem; }
-.cards-select li:hover { background: #e6f4f0; }
-.cards-select li.checked { background: #e0f2ec; }
-.cards-select input[type="checkbox"] { flex: none; }
-.cards-select .card-short { font-weight: 600; }
-.cards-select .card-age { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
-.cards-empty { padding: 0.5rem 0.6rem; color: var(--muted); font-size: 0.85rem; }
-.field-hint { color: var(--muted); font-size: 0.8rem; margin: 0; }
-
 #search-button {
   padding: 0.7rem 1rem; border: 0; border-radius: 8px; font-size: 1rem;
   background: var(--ter); color: #fff; font-weight: 700; cursor: pointer;

@@ -23,88 +23,6 @@ const searchButton = $("#search-button");
 
 let lastJourneys = [];
 
-/* ----------------------------------------------------- cartes de réduction (T11) */
-const CARDS_STORAGE = "terfinder.cards";
-let cardsData = [];
-let selectedCards = loadSelectedCards();
-
-function loadSelectedCards() {
-  try {
-    const raw = localStorage.getItem(CARDS_STORAGE);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveSelectedCards() {
-  try {
-    localStorage.setItem(CARDS_STORAGE, JSON.stringify(selectedCards));
-  } catch { /* stockage indisponible */ }
-}
-
-function cardsQuery() {
-  return selectedCards.join(",");
-}
-
-function initCardsMenu() {
-  const input = $("#cards-search");
-  const list = $("#cards-list");
-  if (!input || !list) return;
-  fetch(API_BASE + "/v1/cards")
-    .then((r) => r.json())
-    .then((body) => {
-      cardsData = body.cards || [];
-      renderCards(list, "");
-    })
-    .catch(() => {});
-  input.addEventListener("input", () => renderCards(list, input.value.trim().toLowerCase()));
-}
-
-function renderCards(list, filter) {
-  const matches = filter
-    ? cardsData.filter((c) => (c.name + " " + (c.shortName || "")).toLowerCase().includes(filter))
-    : cardsData;
-  list.innerHTML = "";
-  if (!matches.length) {
-    const li = document.createElement("li");
-    li.className = "cards-empty";
-    li.textContent = "Aucune carte trouvée.";
-    list.appendChild(li);
-    return;
-  }
-  matches.forEach((c) => {
-    const li = document.createElement("li");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.value = c.id;
-    cb.checked = selectedCards.includes(c.id);
-    cb.addEventListener("change", () => {
-      li.classList.toggle("checked", cb.checked);
-      if (cb.checked) {
-        if (!selectedCards.includes(c.id)) selectedCards.push(c.id);
-      } else {
-        selectedCards = selectedCards.filter((id) => id !== c.id);
-      }
-      saveSelectedCards();
-    });
-    const label = document.createElement("label");
-    label.className = "checkbox";
-    label.appendChild(cb);
-    const short = document.createElement("span");
-    short.className = "card-short";
-    short.textContent = c.shortName || c.name;
-    label.appendChild(short);
-    const age = c.ageRange
-      ? `<span class="card-age">${c.ageRange.lowerBound === 4 ? "Tous" : c.ageRange.lowerBound + "+"}</span>`
-      : "";
-    li.appendChild(label);
-    li.insertAdjacentHTML("beforeend", age);
-    if (cb.checked) li.classList.add("checked");
-    list.appendChild(li);
-  });
-}
-
 /* ------------------------------------------------------------- dates (T5) */
 function initDateRange() {
   fetch(API_BASE + "/v1/health")
@@ -255,11 +173,12 @@ function renderJourneys(journeys) {
   });
 }
 
-/* T11 — liens Trainline : « Réserver le trajet » (total, avec cartes) + billets par leg. */
+/* T11 — lien Trainline « Réserver le trajet » (total) + billets par leg.
+   La logique des cartes (backend, param cards=) est conservée pour plus tard. */
 function ticketLinks(j) {
   if (!j.booking || !j.booking.tickets) return "";
   const total = j.booking.total_url
-    ? `<a class="ticket-chip ticket-total" href="${j.booking.total_url}" target="_blank" rel="noopener noreferrer">Réserver le trajet (Trainline)${selectedCards.length ? " · avec carte(s)" : ""}</a>`
+    ? `<a class="ticket-chip ticket-total" href="${j.booking.total_url}" target="_blank" rel="noopener noreferrer">Réserver le trajet (Trainline)</a>`
     : "";
   const legs = j.legs.filter((l) => l.booking && l.booking.url)
     .map((l) => `<a class="ticket-chip" href="${l.booking.url}" target="_blank" rel="noopener noreferrer">Billet ${l.line || "trajet"} · Trainline</a>`)
@@ -342,7 +261,6 @@ async function search(timeShiftMin = 0) {
     sort: sortBy,
     count: sortBy === "duration" ? "10" : "5",
   });
-  if (selectedCards.length) params.set("cards", cardsQuery());
 
   try {
     const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);
@@ -390,8 +308,6 @@ form.addEventListener("submit", (e) => {
 });
 
 initDateRange();
-initCardsMenu();
-
 
 /* ------------------------------------------------- PWA (T7 v2.1) */
 if ("serviceWorker" in navigator) {

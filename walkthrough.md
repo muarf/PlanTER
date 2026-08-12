@@ -859,7 +859,7 @@ Intégration d'un système d'alerting opérationnel complet sur Telegram.
 
 ## 24. Exécution T11 (cartes de réduction TER) — 12/08/2026
 
-Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) sont sélectionnables dans le web et appliquées au **lien de réservation trajet total** vers Trainline.
+Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) ont d'abord été exposées dans le web et appliquées au **lien de réservation trajet total** vers Trainline. **Le champ web a été retiré le 12/08/2026** : Trainline n'applique pas la carte via l'URL (voir « Limite » ci-dessous). La logique serveur (`/v1/cards`, param `cards=`, `total_url`) est conservée pour plus tard.
 
 ### Rétro-ingénierie : API des cartes Trainline
 
@@ -868,14 +868,22 @@ Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) sont s
 - Résultat : 219 cartes dont 46 `displayGroup=sncf_regional` (cartes TER régionales) → `config/trainline_cards.json` (id hash 40-hex, name, shortName, ageRange optionnel). Ex. la **Carte Bourgogne-Franche-Comté tarif réduit solidaire** = `2a730e22c0be4cf0030f89205f540fe39e8dca6b`, sans `ageRange`.
 - Le lien de réservation fonctionne avec **ou sans** `selectedOutward` mais exige `passengerDiscountCards[]={id}` + `passengers[]={DOB}|pid-0` dès qu'une carte est choisie (Trainline calcule l'âge). DOB par défaut : `1993-08-12`.
 
-### Implémentation
+### Limite découverte le 12/08/2026 : la carte n'est pas appliquée via l'URL
+
+Test réseau (browser headless) sur les deux liens (avec et sans `selectedOutward`) :
+- `POST /api/journey-search/` part avec `"cardIds":[]` — le paramètre d'URL `passengerDiscountCards[]` **n'est pas transmis à l'API** pour un trajet FR.
+- Le JS de Trainline (`Results-TicketOptions-TicketOptionsV2`) : pour l'Europe (`isEurope`), il envoie `storedDiscountCards` (lu depuis le **storage du navigateur**) au lieu du param d'URL.
+- Confirmation utilisateur : le lien « qui marchait » ne s'applique **pas** en navigation privée (session vierge) → la carte ne s'applique que si elle est déjà dans le storage de la session Trainline. Aucun lien ne peut la déclencher (cross-origin : impossible d'écrire dans le localStorage de `trainline.com`).
+
+Conclusion : le champ cartes a été retiré de l'UI ; le lien total pré-remplit le trajet, l'utilisateur ajoute sa carte en un clic dans Trainline.
+
+### Implémentation (conservée)
 
 - `src/trainline_cards.py` : `cards()`, `card_by_id()`, `valid_ids()` (filtre cartes connues, sans doublons), `booking_url(base_url, card_ids)` (ajoute les cartes + `passengers[]`, inchangée sans carte), `DEFAULT_PASSENGER_DOB`.
 - `src/api.py` :
   - `GET /v1/cards` → les 46 cartes TER.
   - `/v1/journeys` : paramètre `cards=id1,id2…` ; ajoute `booking.total_url` (gare de départ → gare d'arrivée du trajet, date/heure du premier leg ferroviaire, cartes appliquées via `trainline_cards.booking_url`). Les liens par leg restent inchangés.
-- `web/index.html` + `web/styles.css` : champ « Cartes de réduction TER » avec recherche + liste à cocher (badge âge « Tous » si lowerBound=4, sinon `26+`…).
-- `web/app.js` : `initCardsMenu()` charge `/v1/cards` et persiste la sélection (`localStorage` `terfinder.cards`) ; le paramètre `cards=` est envoyé à la recherche ; dans les résultats, un chip **« Réserver le trajet (Trainline) »** (total) précède les billets par leg (`.ticket-total`).
+- `web/app.js` : chip **« Réserver le trajet (Trainline) »** (total) qui précède les billets par leg (`.ticket-total`). Le champ cartes et `initCardsMenu()` ont été retirés (pas d'envoi de `cards=`).
 
 ### Vérification
 
@@ -883,6 +891,7 @@ Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) sont s
 curl -s https://ter.zvz.fr/v1/cards | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["cards"]))'   # 46
 curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Besançon Viotte&date=2026-08-10&time=07:00&cards=2a730e22c0be4cf0030f89205f540fe39e8dca6b" | python3 -m json.tool
 # booking.total_url contient passengerDiscountCards[]=2a730e22…&passengers[]=1993-08-12|pid-0
+# (backend uniquement ; le web ne l'utilise plus)
 .venv/bin/python -m unittest tests.test_api tests.test_trainline_cards   # OK
 ```
 

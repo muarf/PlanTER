@@ -664,20 +664,23 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T11 — Cartes de réduction TER (Trainline)
 
-**Statut : ✅ LIVRÉ et VALIDÉ le 12/08/2026** — sélection de cartes TER dans le web, appliquées au lien de réservation trajet total vers Trainline.
+**Statut : ✅ PARTIEL le 12/08/2026** — rétro-ingénierie et logique serveur livrées ; le champ web a été **retiré** : Trainline n'applique pas la carte via l'URL.
 
 **Objectif :** permettre de choisir une ou plusieurs cartes de réduction TER (Carte solidaire, abonnements régionaux…) et les faire appliquer par Trainline lors de la réservation, sans ajout d'âge manuel.
+
+**Limite (12/08/2026) :** vérifié par interception réseau + navigation privée : pour un trajet FR, Trainline lit les cartes depuis le **storage navigateur** (`storedDiscountCards`), pas depuis le param d'URL (`cardIds:[]` dans le POST `journey-search`). Impossible d'écrire dans le localStorage de `trainline.com` depuis notre domaine → le champ a été retiré ; l'utilisateur ajoute sa carte en un clic dans Trainline.
 
 **Livrables :**
 - Rétro-ingénierie de l'API `GET /api/discount-cards` de Trainline (headers JS) → 46 cartes `sncf_regional` extraites dans `config/trainline_cards.json` (id hash 40-hex, name, shortName, ageRange optionnel).
 - `src/trainline_cards.py` : `cards()`, `card_by_id()`, `valid_ids()`, `booking_url()` (ajoute `passengerDiscountCards[]` + `passengers[]={DOB}|pid-0`, URL inchangée sans carte).
-- API : `GET /v1/cards` + paramètre `cards=` sur `/v1/journeys` → `booking.total_url` (lien trajet total gare→gare avec cartes) en plus des liens par leg.
-- Web : champ « Cartes de réduction TER » (recherche + liste à cocher, persistance `localStorage`), chip « Réserver le trajet (Trainline) » dans les résultats.
+- API : `GET /v1/cards` + paramètre `cards=` sur `/v1/journeys` → `booking.total_url` (lien trajet total gare→gare avec cartes) en plus des liens par leg. **Logique conservée pour plus tard** (si Trainline change son comportement ou via un autre canal).
+- Web : chip « Réserver le trajet (Trainline) » (lien trajet total) dans les résultats ; pas de champ cartes (retiré).
 
 **Critères d'acceptation :**
 - `/v1/cards` renvoie les cartes TER (dont la carte solidaire BFC `2a730e22c0be4cf0030f89205f540fe39e8dca6b`).
 - `booking.total_url` contient `passengerDiscountCards[]` et `passengers[]=1993-08-12|pid-0` quand `cards=` est fourni, et reste sans `passengers` sinon.
 - Les cartes inconnues sont ignorées silencieusement ; tests `tests/test_api.py` + `tests/test_trainline_cards.py` verts.
+- La page web ne contient plus de champ cartes (`cards-field` absent, vérifié par test).
 
 **Dépendances :** T9 (cartographie Trainline).
 
@@ -692,7 +695,7 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 | **Phase 3 — Web** | T6 | MVP web en ligne, gratuit |
 | **Phase 4 — Mobile** | T7 | PWA puis apps stores |
 | **Phase 5 — Temps réel** | T8 | Retards et suppressions intégrés |
-| **Phase 6 — Monétisation** | T9 + T11 | Affiliation sans altérer la neutralité ; cartes TER appliquées à la réservation |
+| **Phase 6 — Monétisation** | T9 + T11 | Affiliation sans altérer la neutralité ; lien trajet total Trainline (cartes : logique prête, en attente d'un canal que Trainline honore) |
 | **Phase 7 — Surveillance** | T10 | Alerting Telegram en place et automatisé |
 
 ---
