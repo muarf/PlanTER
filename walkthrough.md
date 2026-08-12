@@ -461,8 +461,9 @@ possible vers Next.js/React en T7 si le SEO/SSR le justifie.
 
 - **Recherche** : champs De/À avec autocomplete (`/v1/stations/search`, debounce
   200 ms, clavier/échap), date (bornée par la couverture du graphe via
-  `/v1/health`), heure, sens départ/arrivée, correspondances max 0-3,
-  filtre « Trains uniquement » (`vehicle=train_only`).
+  `/v1/health`), heure, sens départ/arrivée, correspondances max 0-3.
+  Trains uniquement par défaut (`vehicle=train_only`, plus de case dans le
+  formulaire depuis le 12/08/2026 — `vehicle=all` reste disponible via l'API).
 - **Résultats** : liste Pareto triée par heure de départ (départ, arrivée, durée,
   nb de correspondances, lignes) ; badge **Train TER / Car TER / TramTrain /
   Marche** par leg ; badge « +1j » quand l'arrivée est le lendemain
@@ -894,5 +895,19 @@ curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Besançon Viotte&date=2026
 # (backend uniquement ; le web ne l'utilise plus)
 .venv/bin/python -m unittest tests.test_api tests.test_trainline_cards   # OK
 ```
+
+## 25. Retrait de la case « Trains uniquement » — 12/08/2026
+
+Comme pour la case « Temps réel » (T8), la case à cocher du formulaire a été
+supprimée et le comportement devient le **défaut** :
+
+- `web/index.html` : case retirée.
+- `web/app.js` : le paramètre `vehicle` n'est plus envoyé par le web.
+- `src/api.py` : `vehicle` par défaut passe de `all` à `train_only` (les cars
+  TER ne sont plus proposés par défaut). La valeur `all` reste acceptée par
+  l'API pour les clients qui veulent inclure les cars.
+- Test : `test_page_daccueil_servie` vérifie l'absence de `name="vehicle"` et
+  de « Trains uniquement » dans le HTML ; `test_vehicle_defaut_train_only`
+  vérifie que sans paramètre, tous les legs non-marche sont des trains.
 
 

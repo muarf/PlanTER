@@ -257,7 +257,6 @@ async function search(timeShiftMin = 0) {
     date: $("#date").value,
     time: time,
     datetime_represents: form.elements.datetime_represents.value,
-    vehicle: form.elements.vehicle.checked ? "train_only" : "all",
     sort: sortBy,
     count: sortBy === "duration" ? "10" : "5",
   });

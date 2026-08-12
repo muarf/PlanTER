@@ -143,10 +143,12 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(j["legs"][0]["from"]["name"], "Dijon")
 
     def test_journeys_arrivee_jour_suivant(self):
-        # Paris -> Grenoble 07:00 : arrivée le lendemain (24:31) datée jour+1
+        # Paris -> Grenoble 07:00 : arrivée le lendemain (24:31) datée jour+1.
+        # Trajet de nuit avec car TER : on demande explicitement vehicle=all
+        # (le défaut train_only exclut les cars).
         r = self.client.get(
             "/v1/journeys",
-            params={"from": "Paris", "to": "Grenoble", "date": DATE, "time": "07:00"},
+            params={"from": "Paris", "to": "Grenoble", "date": DATE, "time": "07:00", "vehicle": "all"},
         )
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
@@ -384,6 +386,19 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 422)
 
+    def test_vehicle_defaut_train_only(self):
+        """Sans vehicle=, l'API exclut les cars TER (train_only par défaut) ;
+        vehicle=all les réintroduit si des cars existent sur le trajet."""
+        base = {"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"}
+        r = self.client.get("/v1/journeys", params=base)
+        self.assertEqual(r.status_code, 200)
+        js = r.json()["journeys"]
+        self.assertTrue(js)
+        for j in js:
+            for leg in j["legs"]:
+                if leg["type"] != "walk":
+                    self.assertEqual(leg["type"], "train")
+
 
 class WebTestCase(unittest.TestCase):
     """T6 — la SPA statique est servie par l'API (§8) et référence les assets."""
@@ -403,6 +418,9 @@ class WebTestCase(unittest.TestCase):
         self.assertIn('id="to"', html)
         # T8 — les retards/suppressions sont appliqués d'office, pas d'option dans le formulaire
         self.assertNotIn('name="realtime"', html)
+        # Trains uniquement est le défaut : pas de case dans le formulaire
+        self.assertNotIn('name="vehicle"', html)
+        self.assertNotIn("Trains uniquement", html)
         # T11 — le champ cartes a été retiré (Trainline n'applique pas la carte via l'URL) ;
         # la logique serveur (param cards=, /v1/cards) reste disponible pour plus tard.
         self.assertNotIn("cards-field", html)

@@ -297,7 +297,7 @@ GET /v1/journeys
     &time=HH:MM
     &datetime_represents=departure|arrival     (défaut: departure)
     &max_transfers=0..6                         (défaut: 6)
-    &vehicle=all|train_only                    (défaut: all)
+    &vehicle=all|train_only                    (défaut: train_only — pas de cars TER)
     &count=<nb max de trajets retournés>       (défaut: 5)
     → { journeys: [Journey] }                   (§6.5)
 
@@ -335,7 +335,7 @@ erreur 400, et **résoudre la circulation à la date demandée** (§4.5).
 1. **Accueil / recherche** :
    - Champs « De » et « À » avec autocomplete (endpoint `/v1/stations/search`).
    - Date + heure, sens (départ / arrivée).
-   - Filtre « Trains uniquement » (les correspondances sont proposées automatiquement, jusqu'à 6).
+   - Filtre « Trains uniquement » (les correspondances sont proposées automatiquement, jusqu'à 6). **Depuis le 12/08/2026, ce filtre est le défaut** (plus de case dans le formulaire) ; `vehicle=all` reste utilisable via l'API pour inclure les cars TER.
    - Bouton rechercher.
 2. **Résultats** :
    - Liste des trajets Pareto triés par heure de départ.
@@ -468,7 +468,7 @@ le cas canonique `Paris Gare de Lyon → Besançon Viotte` est trouvé en 1 chan
 - Modes **DepartAfter** et **ArriveBy**.
 - Limite `max_transfers` (0–6).
 - Gestion des services de nuit / fenêtre de recherche (§6.4).
-- Filtre `vehicle=all|train_only` (exclut `OCECar TER` et `OCETramTrain` si demandé).
+- Filtre `vehicle=all|train_only` (exclut `OCECar TER` et `OCETramTrain` si demandé). **Défaut `train_only` depuis le 12/08/2026.**
 - Objet `Journey` sérialisable au format JSON de §6.5.
 - Tests unitaires : trajet direct, 1 correspondance, 2 correspondances, 3 correspondances, pas de solution, nuit.
 
