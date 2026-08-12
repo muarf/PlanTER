@@ -714,10 +714,12 @@ flux GTFS-RT Trip Updates.
   `_shift_leg` décale les horaires réels d'un leg (départ = retard à
   l'embarquement, arrivée = retard au débarquement) et expose `Leg.delay_min`.
 - `src/api.py` : poller démarré avec le moteur (lifespan), paramètre
-  `use_realtime=true` sur `/v1/journeys`, section `realtime` dans `/v1/health`
+  `use_realtime` sur `/v1/journeys` (défaut `true` : les retards réels sont
+  toujours appliqués, le paramètre reste pour compatibilité descendante),
+  section `realtime` dans `/v1/health`
   (âge, fraîcheur, nb trips retardés/supprimés, timestamp GTFS-RT), alerte
   `connection_risks` (jonction dont le retard a consommé la marge planifiée).
-- UI : checkbox « Temps réel (retards & suppressions) », badges `+X min` dans
+- UI : badges `+X min` dans
   résultats et détail, avertissement « correspondance risquée » + bouton
   « Voir une alternative plus tard (+30 min) ».
 

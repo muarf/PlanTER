@@ -251,7 +251,6 @@ async function search(timeShiftMin = 0) {
     sort: sortBy,
     count: sortBy === "duration" ? "10" : "5",
   });
-  if (form.elements.realtime.checked) params.set("use_realtime", "true");
 
   try {
     const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);

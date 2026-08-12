@@ -174,8 +174,9 @@ class ApiTestCase(unittest.TestCase):
             self.assertIn("delay_min", leg)
             self.assertGreaterEqual(leg["delay_min"], 0)
 
-    def test_journeys_sans_realtime_zero(self):
-        """T8 — sans use_realtime, delay_min vaut 0 (pas de temps réel appliqué)."""
+    def test_journeys_sans_poller_delay_min_zero(self):
+        """T8 — sans poller temps réel actif, delay_min vaut 0 (use_realtime est
+        le défaut, mais aucun flux n'est injecté ici)."""
         r = self.client.get(
             "/v1/journeys",
             params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
@@ -253,13 +254,13 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(risks[0]["at_station"], "Dijon")
         self.assertEqual(risks[0]["from_line"], "K7")
         self.assertEqual(risks[0]["delay_min"], 20)
-        # sans temps réel, aucune section risks
+        # sans retard injecté, aucune correspondance à risque (champ présent mais vide)
         r0 = self.client.get(
             "/v1/journeys",
             params={"from": "Paris Gare de Lyon", "to": "Besançon Viotte",
                     "date": DATE, "time": "07:00"},
         )
-        self.assertNotIn("connection_risks", r0.json()["journeys"][0])
+        self.assertEqual(r0.json()["journeys"][0].get("connection_risks"), [])
 
     # ----------------------------------------------------------------- errors
     def test_gare_introuvable_404(self):
@@ -327,8 +328,8 @@ class WebTestCase(unittest.TestCase):
         self.assertIn('id="search-form"', html)
         self.assertIn('id="from"', html)
         self.assertIn('id="to"', html)
-        # T8 — option temps réel dans le formulaire
-        self.assertIn('name="realtime"', html)
+        # T8 — les retards/suppressions sont appliqués d'office, pas d'option dans le formulaire
+        self.assertNotIn('name="realtime"', html)
 
     def test_assets_servis(self):
         self.assertEqual(self.client.get("/styles.css").status_code, 200)

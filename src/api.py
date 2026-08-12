@@ -297,7 +297,7 @@ def journeys(
     count: int = Query(5, ge=1, le=20),
     sort: str = Query("departure", pattern="^(departure|duration)$",
                       description="Tri des résultats : departure (heure de départ, défaut) ou duration (le plus court d'abord)"),
-    use_realtime: bool = Query(False, description="T8 — appliquer les retards/suppressions GTFS-RT"),
+    use_realtime: bool = Query(True, description="T8 — appliquer les retards/suppressions GTFS-RT (par défaut, les retards réels sont la réalité affichée)"),
 ) -> dict:
     engine = get_engine()
     g = engine.graph

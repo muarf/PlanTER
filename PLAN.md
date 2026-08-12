@@ -615,7 +615,7 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 **Livrables :**
 - Polling périodique de `sncf-gtfs-rt-trip-updates` et `sncf-gtfs-rt-service-alerts` (toutes les ~2 min).
 - Application des retards/suppressions sur le graphe en mémoire (recalcul d'itinéraires avec horaires réels).
-- Endpoint `/v1/journeys` avec paramètre `use_realtime=true`.
+- Endpoint `/v1/journeys` avec paramètre `use_realtime` (défaut `true` — les retards réels sont la réalité affichée, le paramètre reste pour compatibilité).
 - Affichage UI : retards, suppressions, « correspondance manquée » + proposition d'alternative, bandeau perturbations.
 
 **Critères d'acceptation :** avec le flux réel branché, un trajet dont le train est retardé de 12 min s'affiche avec le retard ; un train supprimé ne génère plus d'itinéraire (ou génère une alternative) ; une perturbation ciblant une gare ou un train du trajet s'affiche en bandeau.
