@@ -26,7 +26,7 @@ from starlette.types import Scope, Receive, Send
 
 from src.graph import Graph, ALIASES
 from src.raptor import RaptorEngine
-from src import gtfs_rt, trainline
+from src import gtfs_rt, trainline, trainline_cards
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -285,6 +285,13 @@ def stations_search(
     }
 
 
+@app.get("/v1/cards", tags=["itinéraires"])
+def cards_list() -> dict:
+    """T11 — cartes de réduction TER (Trainline, displayGroup=sncf_regional).
+    Ids envoyés en `cards` sur /v1/journeys pour le lien trajet total."""
+    return {"cards": trainline_cards.cards()}
+
+
 @app.get("/v1/journeys", tags=["itinéraires"])
 def journeys(
     from_: str = Query(..., alias="from", description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
@@ -298,6 +305,7 @@ def journeys(
     sort: str = Query("departure", pattern="^(departure|duration)$",
                       description="Tri des résultats : departure (heure de départ, défaut) ou duration (le plus court d'abord)"),
     use_realtime: bool = Query(True, description="T8 — appliquer les retards/suppressions GTFS-RT (par défaut, les retards réels sont la réalité affichée)"),
+    cards: str = Query("", description="T11 — cartes de réduction TER (ids Trainline, séparés par des virgules). Appliquées au lien de réservation trajet total."),
 ) -> dict:
     engine = get_engine()
     g = engine.graph
@@ -338,13 +346,21 @@ def journeys(
     # T8 — alertes Service Alerts : pertinentes si une gare ou un train du trajet
     # est touché. On expose au plus 3 (les alertes générales restent dans health).
     alerts_feed = _poller.alerts_snapshot() if (_poller is not None) else None
+    # T11 — cartes de réduction TER demandées (ids Trainline, validés).
+    card_ids = trainline_cards.valid_ids([c for c in cards.split(",") if c])
     for j in journeys:
         jd = _bare_journey(j.to_json(d))
         bookable = 0
+        # T11 — leg ferroviaire de départ et d'arrivée (marches exclues), pour
+        # le lien « trajet total » (une seule réservation de bout en bout).
+        first_leg = last_leg = None
         for leg in jd["legs"]:
             leg["booking"] = None
             if leg["type"] == "walk":
                 continue
+            if first_leg is None:
+                first_leg = leg
+            last_leg = leg
             leg_date, leg_time = _iso(leg)
             if not leg_date:
                 continue
@@ -356,6 +372,16 @@ def journeys(
                 leg["booking"] = {"provider": "trainline", "url": url}
                 bookable += 1
         jd["booking"] = {"provider": "trainline", "tickets": bookable}
+        # T11 — lien trajet total (gare de départ → gare d'arrivée, heure du
+        # premier leg ferroviaire) ; les cartes de réduction y sont ajoutées.
+        if first_leg is not None and last_leg is not None:
+            f_date, f_time = _iso(first_leg)
+            total_url = trainline.booking_url(
+                first_leg["from"]["stop_area_id"], last_leg["to"]["stop_area_id"],
+                f_date, f_time,
+            )
+            if total_url:
+                jd["booking"]["total_url"] = trainline_cards.booking_url(total_url, card_ids)
         # T8 — correspondances à risque (retard réel menaçant la jonction).
         if realtime is not None:
             jd["connection_risks"] = _connection_risks(jd)

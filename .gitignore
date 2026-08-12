@@ -11,6 +11,11 @@ venv/
 # Node / npm
 node_modules/
 
+# Secrets locaux (token Telegram, clés…)
+.env
+.env.*
+!.env.example
+
 # Android (Capacitor) — build outputs
 android/app/build/
 android/.gradle/

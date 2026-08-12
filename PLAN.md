@@ -641,6 +641,48 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ---
 
+### TÂCHE T10 — Surveillance opérationnelle (Alerting Telegram)
+
+**Statut : ✅ LIVRÉ et VALIDÉ le 12/08/2026** — scripts d'alerte et de monitoring intégrés et testés avec succès sur Telegram.
+
+**Objectif :** surveiller la santé de l'API et du pipeline de données de manière continue et envoyer des alertes sur Telegram en cas de panne ou d'anomalie.
+
+**Livrables :**
+- Intégration de notifications Telegram dans `scripts/refresh_data.sh` en cas d'échec d'une étape (téléchargement, filtrage, validation, build ou redémarrage de l'API).
+- Création du script de monitoring `scripts/monitor_health.py` pour vérifier l'API, la fraîcheur des flux temps réel GTFS-RT et l'expiration des données.
+- Planification cron automatique toutes les 10 minutes.
+- **Sécurité (12/08/2026) :** le token et le chat ID ne sont plus en clair — lus depuis `/etc/ter-finder/ter-finder.env` (variables `TER_FINDER_TELEGRAM_TOKEN` / `TER_FINDER_TELEGRAM_CHAT_ID`, cf. `.env.example`), chargé par le cron et `EnvironmentFile=` du service systemd. Sans variables, alertes ignorées.
+
+**Critères d'acceptation :**
+- Le script `scripts/monitor_health.py` s'exécute sans erreur et est planifié en cron.
+- Les alertes sont correctement reçues sur Telegram sans spammer.
+- Aucun secret Telegram n'est présent dans le dépôt.
+
+**Dépendances :** T5, T8.
+
+---
+
+### TÂCHE T11 — Cartes de réduction TER (Trainline)
+
+**Statut : ✅ LIVRÉ et VALIDÉ le 12/08/2026** — sélection de cartes TER dans le web, appliquées au lien de réservation trajet total vers Trainline.
+
+**Objectif :** permettre de choisir une ou plusieurs cartes de réduction TER (Carte solidaire, abonnements régionaux…) et les faire appliquer par Trainline lors de la réservation, sans ajout d'âge manuel.
+
+**Livrables :**
+- Rétro-ingénierie de l'API `GET /api/discount-cards` de Trainline (headers JS) → 46 cartes `sncf_regional` extraites dans `config/trainline_cards.json` (id hash 40-hex, name, shortName, ageRange optionnel).
+- `src/trainline_cards.py` : `cards()`, `card_by_id()`, `valid_ids()`, `booking_url()` (ajoute `passengerDiscountCards[]` + `passengers[]={DOB}|pid-0`, URL inchangée sans carte).
+- API : `GET /v1/cards` + paramètre `cards=` sur `/v1/journeys` → `booking.total_url` (lien trajet total gare→gare avec cartes) en plus des liens par leg.
+- Web : champ « Cartes de réduction TER » (recherche + liste à cocher, persistance `localStorage`), chip « Réserver le trajet (Trainline) » dans les résultats.
+
+**Critères d'acceptation :**
+- `/v1/cards` renvoie les cartes TER (dont la carte solidaire BFC `2a730e22c0be4cf0030f89205f540fe39e8dca6b`).
+- `booking.total_url` contient `passengerDiscountCards[]` et `passengers[]=1993-08-12|pid-0` quand `cards=` est fourni, et reste sans `passengers` sinon.
+- Les cartes inconnues sont ignorées silencieusement ; tests `tests/test_api.py` + `tests/test_trainline_cards.py` verts.
+
+**Dépendances :** T9 (cartographie Trainline).
+
+---
+
 ## 15. Roadmap
 
 | Phase | Contenu | Critère de sortie |
@@ -650,7 +692,8 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 | **Phase 3 — Web** | T6 | MVP web en ligne, gratuit |
 | **Phase 4 — Mobile** | T7 | PWA puis apps stores |
 | **Phase 5 — Temps réel** | T8 | Retards et suppressions intégrés |
-| **Phase 6 — Monétisation** | T9 | Affiliation sans altérer la neutralité |
+| **Phase 6 — Monétisation** | T9 + T11 | Affiliation sans altérer la neutralité ; cartes TER appliquées à la réservation |
+| **Phase 7 — Surveillance** | T10 | Alerting Telegram en place et automatisé |
 
 ---
 

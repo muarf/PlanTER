@@ -673,19 +673,11 @@ Gares non mappées (peu fréquentes) : `booking.url` vaut `null`, pas de bouton.
 
 ## 18. Prochaines étapes (mise à jour)
 
-**État au 11/08/2026.** Toutes les tâches techniques T1–T8 sont livrées et validées
-(moteur, API, web, PWA/native, temps réel). Restent, par ordre d'opportunité :
+**État au 12/08/2026.** Toutes les tâches techniques T1–T8, T10 et T11 sont livrées et validées (moteur, API, web, PWA/native, temps réel, alerting, cartes TER). Restent, par ordre d'opportunité :
 
-1. **Publication stores (§9/Phase 4)** — l'app native Capacitor (T7 v2.2) n'est
-   **pas publiée** sur Play Store / App Store : nécessite comptes développeur
-   (25 € une fois Google, 99 €/an Apple) + soumission manuelle. Non bloquant.
-2. **Surveillance opérationnelle** — le polling GTFS-RT et le refresh hebdo n'ont
-   pas d'alerting : prévoir un contrôle externe (ex. uptime check sur `/v1/health`
-   + alerte si `realtime.alerts.fresh=false` prolongé, ou si `last_refresh.status`
-   échoue).
-3. **Programme d'affiliation (T9/Phase 6)** — le PoC (liens Trainline) est livré ;
-   le programme proprement dit (commission, paramètre d'affiliation, tracking)
-   dépend d'un accord commercial, hors code.
+1. **Publication stores (§9/Phase 4)** — l'app native Capacitor (T7 v2.2) n'est **pas publiée** sur Play Store / App Store : nécessite comptes développeur (25 € une fois Google, 99 €/an Apple) + soumission manuelle. Non bloquant.
+2. **Surveillance opérationnelle** — **Livré le 12/08/2026** (T10).
+3. **Programme d'affiliation (T9/Phase 6)** — le PoC (liens Trainline + cartes TER T11) est livré ; le programme proprement dit (commission, paramètre d'affiliation, tracking) dépend d'un accord commercial, hors code.
 
 Les déploiements web/API sont documentés en §13.
 
@@ -843,4 +835,55 @@ le job `release` s'exécute toujours (sauf pull_request), une étape
 `Check keystore availability` lit `KEYSTORE_BASE64` via `env` et exporte
 `skip=true` si le secret est absent ; les étapes de décodage/signature/upload ne
 tournent que si `skip != true`. CI verte (APK debug buildé + release si secrets).
+
+## 23. Exécution T10 (surveillance opérationnelle et alerting Telegram) — 12/08/2026
+
+Intégration d'un système d'alerting opérationnel complet sur Telegram.
+
+### Configuration du Bot & Chat ID
+- Utilisation d'un bot Telegram (`PlanTER`) ; le token et le chat ID ne sont **pas** commités : ils sont lus depuis `/etc/ter-finder/ter-finder.env` (variables `TER_FINDER_TELEGRAM_TOKEN` / `TER_FINDER_TELEGRAM_CHAT_ID`, voir `.env.example`). Sans ces variables, les alertes sont silencieusement ignorées.
+
+### Implémentation
+- **Alerte sur échec du pipeline** : Modifications de `scripts/refresh_data.sh` pour envoyer une alerte en cas d'erreur de téléchargement, filtrage, validation, build ou redémarrage du service systemd.
+- **Surveillance continue** : Script `scripts/monitor_health.py` effectuant des requêtes locales vers `/v1/health`. Il détecte :
+  - L'API injoignable ou en code d'erreur HTTP non-200.
+  - La perte de fraîcheur du flux temps réel (Trip Updates / Service Alerts).
+  - L'expiration imminente des données GTFS théoriques (dans les 7 jours).
+  - Un échec du refresh hebdomadaire.
+  - *Anti-spam* : Fichier de verrou `/tmp/ter_finder_alert_sent` permettant de n'envoyer qu'un seul message par incident persistant, et un message de rétablissement `✅` lors du retour à la normale.
+- **Automatisation** : Planification automatique via cron (`crontab -e`) toutes les 10 minutes pour l'utilisateur `ubuntu`, en sourçant `/etc/ter-finder/ter-finder.env` avant le script. Le service systemd `ter-finder-refresh.service` charge le même fichier via `EnvironmentFile=`. Le token a été retiré des scripts le 12/08/2026 (sécurité : plus aucun secret en clair dans le repo).
+
+### Vérification
+- Validation de l'envoi de l'alerte de test via curl (reçue avec succès sur Telegram).
+- Exécution manuelle réussie de `scripts/monitor_health.py` (aucune erreur, API saine).
+
+## 24. Exécution T11 (cartes de réduction TER) — 12/08/2026
+
+Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) sont sélectionnables dans le web et appliquées au **lien de réservation trajet total** vers Trainline.
+
+### Rétro-ingénierie : API des cartes Trainline
+
+- `GET https://www.thetrainline.com/api/discount-cards` renvoie 401 sans headers JS, mais **200** avec :
+  `x-app-version: 4.48.32605`, `x-client-name: DesktopWeb`, `x-platform-type: web`, `x-api-managedgroupname: TRAINLINE`, `x-version`, `Accept-Language: fr-FR`.
+- Résultat : 219 cartes dont 46 `displayGroup=sncf_regional` (cartes TER régionales) → `config/trainline_cards.json` (id hash 40-hex, name, shortName, ageRange optionnel). Ex. la **Carte Bourgogne-Franche-Comté tarif réduit solidaire** = `2a730e22c0be4cf0030f89205f540fe39e8dca6b`, sans `ageRange`.
+- Le lien de réservation fonctionne avec **ou sans** `selectedOutward` mais exige `passengerDiscountCards[]={id}` + `passengers[]={DOB}|pid-0` dès qu'une carte est choisie (Trainline calcule l'âge). DOB par défaut : `1993-08-12`.
+
+### Implémentation
+
+- `src/trainline_cards.py` : `cards()`, `card_by_id()`, `valid_ids()` (filtre cartes connues, sans doublons), `booking_url(base_url, card_ids)` (ajoute les cartes + `passengers[]`, inchangée sans carte), `DEFAULT_PASSENGER_DOB`.
+- `src/api.py` :
+  - `GET /v1/cards` → les 46 cartes TER.
+  - `/v1/journeys` : paramètre `cards=id1,id2…` ; ajoute `booking.total_url` (gare de départ → gare d'arrivée du trajet, date/heure du premier leg ferroviaire, cartes appliquées via `trainline_cards.booking_url`). Les liens par leg restent inchangés.
+- `web/index.html` + `web/styles.css` : champ « Cartes de réduction TER » avec recherche + liste à cocher (badge âge « Tous » si lowerBound=4, sinon `26+`…).
+- `web/app.js` : `initCardsMenu()` charge `/v1/cards` et persiste la sélection (`localStorage` `terfinder.cards`) ; le paramètre `cards=` est envoyé à la recherche ; dans les résultats, un chip **« Réserver le trajet (Trainline) »** (total) précède les billets par leg (`.ticket-total`).
+
+### Vérification
+
+```bash
+curl -s https://ter.zvz.fr/v1/cards | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["cards"]))'   # 46
+curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Besançon Viotte&date=2026-08-10&time=07:00&cards=2a730e22c0be4cf0030f89205f540fe39e8dca6b" | python3 -m json.tool
+# booking.total_url contient passengerDiscountCards[]=2a730e22…&passengers[]=1993-08-12|pid-0
+.venv/bin/python -m unittest tests.test_api tests.test_trainline_cards   # OK
+```
+
 

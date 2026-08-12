@@ -218,6 +218,79 @@ class ApiTestCase(unittest.TestCase):
         self.assertGreater(len(js), 2)
         self.assertTrue(any(j["departure"][11:13] >= "14" for j in js))
 
+    # ------------------------------------------------------------ cartes (T11)
+    BFC_SOLIDAIRE = "2a730e22c0be4cf0030f89205f540fe39e8dca6b"
+    BFC_26 = "5be729fcfc26caa921c53f6d836175d832c288ca"
+
+    def test_cards_liste_cartes_ter(self):
+        """T11 — /v1/cards expose les cartes TER (dont la carte solidaire BFC)."""
+        r = self.client.get("/v1/cards")
+        self.assertEqual(r.status_code, 200)
+        cards = r.json()["cards"]
+        self.assertGreater(len(cards), 30)
+        ids = [c["id"] for c in cards]
+        self.assertIn(self.BFC_SOLIDAIRE, ids)
+        bfc = next(c for c in cards if c["id"] == self.BFC_SOLIDAIRE)
+        self.assertIn("Bourgogne", bfc["name"])
+        self.assertIn("name", bfc)
+        self.assertIn("shortName", bfc)
+
+    def test_journeys_total_url_sans_carte_sans_passenger(self):
+        """T11 — le lien trajet total existe ; sans carte, aucun paramètre
+        passengerDiscountCards ni passengers[]."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        total = j["booking"].get("total_url")
+        self.assertIsNotNone(total)
+        self.assertIn("thetrainline.com/book/results", total)
+        self.assertNotIn("passengerDiscountCards", total)
+        self.assertNotIn("passengers", total)
+
+    def test_journeys_total_url_avec_carte(self):
+        """T11 — cards=… : la carte et le passager (DOB par défaut) sont ajoutés
+        au lien trajet total ; les legs gardent leurs liens par billet."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
+                    "cards": self.BFC_SOLIDAIRE},
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        total = j["booking"]["total_url"]
+        self.assertIn(f"passengerDiscountCards[]={self.BFC_SOLIDAIRE}", total)
+        self.assertIn("passengers[]=1993-08-12|pid-0", total)
+        # les billets par leg subsistent
+        self.assertTrue(any(l.get("booking", {}).get("url") for l in j["legs"]))
+
+    def test_journeys_total_url_plusieurs_cartes(self):
+        """T11 — plusieurs cartes → autant de paramètres passengerDiscountCards[]."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
+                    "cards": f"{self.BFC_SOLIDAIRE},{self.BFC_26}"},
+        )
+        self.assertEqual(r.status_code, 200)
+        total = r.json()["journeys"][0]["booking"]["total_url"]
+        self.assertEqual(total.count("passengerDiscountCards[]"), 2)
+        self.assertIn(self.BFC_SOLIDAIRE, total)
+        self.assertIn(self.BFC_26, total)
+
+    def test_journeys_carte_inconnue_ignoree(self):
+        """T11 — une carte inconnue est ignorée silencieusement (URL inchangée)."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
+                    "cards": f"inconnue,{self.BFC_SOLIDAIRE}"},
+        )
+        self.assertEqual(r.status_code, 200)
+        total = r.json()["journeys"][0]["booking"]["total_url"]
+        self.assertEqual(total.count("passengerDiscountCards[]"), 1)
+        self.assertNotIn("inconnue", total)
+
     def test_connection_risks_detecte_retard_rongeant_la_marge(self):
         """T8 — une correspondance dont le retard a consommé la marge planifiée
         est signalée (connection_risks) ; absente sans temps réel."""
