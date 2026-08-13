@@ -1,0 +1,99 @@
+{
+  "paris": {
+    "label": "Paris",
+    "aliases": ["paris", "paris toutes gares", "paris tous", "toutes les gares de paris"],
+    "stations": [
+      "Paris Est",
+      "Paris Gare du Nord",
+      "Paris Saint-Lazare",
+      "Paris Montparnasse Hall 1 - 2",
+      "Paris Montparnasse Vaugirard",
+      "Paris Austerlitz",
+      "Paris Gare de Lyon Hall 1 - 2",
+      "Paris Bercy Bourg. Pays d'Auv."
+    ]
+  },
+  "lyon": {
+    "label": "Lyon",
+    "aliases": ["lyon", "lyon toutes gares", "lyon tous", "toutes les gares de lyon"],
+    "stations": [
+      "Lyon Part Dieu",
+      "Lyon Perrache",
+      "Lyon Vaise",
+      "Lyon Saint-Paul",
+      "Lyon Jean Macé",
+      "Lyon Gorge de Loup"
+    ]
+  },
+  "marseille": {
+    "label": "Marseille",
+    "aliases": ["marseille", "marseille toutes gares", "marseille tous", "toutes les gares de marseille"],
+    "stations": ["Marseille Saint-Charles", "Marseille Blancarde"]
+  },
+  "lille": {
+    "label": "Lille",
+    "aliases": ["lille", "lille toutes gares", "lille tous", "toutes les gares de lille"],
+    "stations": ["Lille Flandres", "Lille Europe"]
+  },
+  "nice": {
+    "label": "Nice",
+    "aliases": ["nice", "nice toutes gares", "nice tous", "toutes les gares de nice"],
+    "stations": ["Nice-Ville", "Nice Saint-Augustin", "Nice Riquier"]
+  },
+  "grenoble": {
+    "label": "Grenoble",
+    "aliases": ["grenoble", "grenoble toutes gares", "grenoble tous", "toutes les gares de grenoble"],
+    "stations": ["Grenoble", "Grenoble Universités - Gières"]
+  },
+  "dijon": {
+    "label": "Dijon",
+    "aliases": ["dijon", "dijon toutes gares", "dijon tous", "toutes les gares de dijon"],
+    "stations": ["Dijon", "Dijon Porte Neuve"]
+  },
+  "mulhouse": {
+    "label": "Mulhouse",
+    "aliases": ["mulhouse", "mulhouse toutes gares", "mulhouse tous", "toutes les gares de mulhouse"],
+    "stations": ["Mulhouse", "Mulhouse Dornach"]
+  },
+  "metz": {
+    "label": "Metz",
+    "aliases": ["metz", "metz toutes gares", "metz tous", "toutes les gares de metz"],
+    "stations": ["Metz", "Metz Nord"]
+  },
+  "angers": {
+    "label": "Angers",
+    "aliases": ["angers", "angers toutes gares", "angers tous", "toutes les gares de angers"],
+    "stations": ["Angers Saint-Laud", "Angers Maître École"]
+  },
+  "limoges": {
+    "label": "Limoges",
+    "aliases": ["limoges", "limoges toutes gares", "limoges tous", "toutes les gares de limoges"],
+    "stations": ["Limoges Bénédictins", "Limoges Montjovis"]
+  },
+  "la rochelle": {
+    "label": "La Rochelle",
+    "aliases": ["la rochelle", "la rochelle toutes gares", "la rochelle tous", "toutes les gares de la rochelle"],
+    "stations": ["La Rochelle", "La Rochelle Porte Dauphine"]
+  },
+  "nimes": {
+    "label": "Nîmes",
+    "aliases": ["nimes", "nimes toutes gares", "nimes tous", "toutes les gares de nimes"],
+    "stations": ["Nîmes Centre", "Nîmes Pont du Gard"]
+  },
+  "saint etienne": {
+    "label": "Saint-Étienne",
+    "aliases": ["saint etienne", "saint etienne toutes gares", "saint etienne tous", "toutes les gares de saint etienne"],
+    "stations": [
+      "Saint-Étienne Châteaucreux",
+      "Saint-Étienne Carnot",
+      "Saint-Étienne Bellevue",
+      "Saint-Étienne Le Clapier",
+      "Saint-Étienne La Terrasse"
+    ]
+  },
+  "albi": {
+    "label": "Albi",
+    "aliases": ["albi", "albi toutes gares", "albi tous", "toutes les gares de albi"],
+    "stations": ["Albi Ville", "Albi Madeleine"]
+  }
+}

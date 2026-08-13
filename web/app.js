@@ -53,7 +53,7 @@ function setupAutocomplete(inputEl, listEl) {
       li.id = `${inputEl.id}-opt-${i}`;
       li.textContent = s.name;
       li.addEventListener("click", () => {
-        inputEl.value = s.name;
+        inputEl.value = s.value !== undefined ? s.value : s.name;
         hide();
       });
       listEl.appendChild(li);
@@ -78,7 +78,12 @@ function setupAutocomplete(inputEl, listEl) {
     timer = setTimeout(async () => {
       const res = await fetch(`${API_BASE}/v1/stations/search?q=${encodeURIComponent(q)}&limit=6`);
       if (!res.ok) return;
-      items = (await res.json()).stations;
+      const data = await res.json();
+      const groups = (data.place_groups || []).map((g) => ({
+        name: `${g.name} — toutes les gares`,
+        value: g.name,
+      }));
+      items = [...groups, ...(data.stations || [])];
       render();
     }, 200);
   });
@@ -420,7 +425,7 @@ async function search(timeShiftMin = 0) {
     time: time,
     datetime_represents: form.elements.datetime_represents.value,
     sort: sortBy,
-    count: sortBy === "duration" ? "10" : "5",
+    count: sortBy === "departure" ? "5" : "10",
   });
   if (selectedCards.size) params.set("cards", [...selectedCards].join(","));
 
@@ -450,11 +455,16 @@ async function search(timeShiftMin = 0) {
   }
 }
 
-let sortBy = "departure";
+let sortBy = "transfers";
 function setSortButtons() {
+  $("#sort-transfers").classList.toggle("active", sortBy === "transfers");
   $("#sort-departure").classList.toggle("active", sortBy === "departure");
   $("#sort-duration").classList.toggle("active", sortBy === "duration");
 }
+$("#sort-transfers").addEventListener("click", () => {
+  sortBy = "transfers";
+  search();
+});
 $("#sort-departure").addEventListener("click", () => {
   sortBy = "departure";
   search();

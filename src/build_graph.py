@@ -33,7 +33,7 @@ from src import config as cfg  # noqa: E402
 from src.graph import (  # noqa: E402
     DEFAULT_MIN_TRANSFER_MIN,
     ALIASES,
-    PARIS_STATION_NAMES,
+    build_place_groups,
     Graph,
     Route,
     StopArea,
@@ -48,6 +48,7 @@ DEFAULT_INPUT = ROOT / "data" / "ter" / "gtfs_ter.zip"
 DEFAULT_OUTPUT = ROOT / "data" / "graph.bin"
 DEFAULT_INTERCHANGE = ROOT / "config" / "interchange.yaml"
 DEFAULT_PARIS_LINKS = ROOT / "config" / "paris_links.yaml"
+DEFAULT_PLACE_GROUPS = ROOT / "config" / "place_groups.json"
 
 
 def _hhmm_to_min(hhmm: str) -> int:
@@ -120,11 +121,27 @@ def _build_graph(zip_path: Path, interchange: dict[str, str], links: dict[str, s
                 index[alias_norm].add(idx)
     graph.search_index = {k: sorted(v) for k, v in index.items()}
 
-    # --- Groupes de gares (« Paris toutes gares » §5.5) -----------------
-    paris_targets = {normalize(n) for n in PARIS_STATION_NAMES}
-    graph.place_groups["paris"] = sorted(
-        idx for idx, stop in enumerate(graph.stops) if normalize(stop.name) in paris_targets
-    )
+    # --- Groupes de gares (« toutes gares » §5.5) -------------------------
+    # Config config/place_groups.json : {ville → {label, aliases, stations}}.
+    # Les gares absentes du GTFS sont ignorées (build_place_groups), on
+    # avertit ici si un groupe prévu est vide ou trop petit.
+    import json as _json
+
+    pg_path = ROOT / "config" / "place_groups.json"
+    try:
+        pg_config = _json.loads(pg_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print(f"[build] ⚠ {pg_path} introuvable : groupes « toutes gares » absents.", file=sys.stderr)
+        pg_config = {}
+    build_place_groups(graph, pg_config)
+    for key, members in graph.place_groups.items():
+        if len(members) < 2:
+            print(f"[build] ⚠ groupe « {key} » (toutes gares) : {len(members)} gare(s) trouvée(s).",
+                  file=sys.stderr)
+    missing = [name for spec in pg_config.values() for name in spec.get("stations", [])
+               if normalize(name) not in {normalize(s.name) for s in graph.stops}]
+    if missing:
+        print(f"[build] ⚠ gares du fichier place_groups.json absentes du GTFS : {missing}", file=sys.stderr)
 
     # --- Routes ---------------------------------------------------------
     for r in routes_rows:
@@ -292,7 +309,8 @@ def verify(graph: Graph, date: int) -> list[str]:
     if not route_serves("K7", "lyon p d", dijon, bercy):
         problems.append(f"K7 Dijon -> Paris Bercy absent à la date {date} (retour du soir)")
 
-    # Groupe « Paris toutes gares »
+    # Groupes « toutes gares » (§5.5) : Paris doit rester bien fourni, et
+    # chaque groupe configuré doit contenir au moins 2 gares.
     paris_group = graph.place_groups.get("paris", [])
     if len(paris_group) < 5:
         problems.append(f"groupe Paris (toutes gares) trop petit : {len(paris_group)} gares")
@@ -300,6 +318,9 @@ def verify(graph: Graph, date: int) -> list[str]:
         problems.append("Paris Gare de Lyon absent du groupe Paris")
     if bercy is not None and bercy not in paris_group:
         problems.append("Paris Bercy absent du groupe Paris")
+    for key, members in graph.place_groups.items():
+        if len(members) < 2:
+            problems.append(f"groupe « {key} » (toutes gares) : {len(members)} gare(s)")
 
     return problems
 

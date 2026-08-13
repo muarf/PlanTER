@@ -1,7 +1,7 @@
 /* planTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v5";
+const CACHE = "ter-finder-v6";
 const SHELL = [
   "/",
   "/styles.css",

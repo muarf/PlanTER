@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope, Receive, Send
 
-from src.graph import Graph, ALIASES
+from src.graph import Graph, ALIASES, normalize
 from src.raptor import RaptorEngine, _iso as _iso_min
 from src import gtfs_rt, trainline, trainline_cards
 from src.pricing import PricingEngine
@@ -39,6 +39,15 @@ _COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 _engine: RaptorEngine | None = None
 _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
+
+
+def _load_place_groups() -> dict:
+    """Config des groupes « toutes gares » (§5.5) ; [] si fichier absent."""
+    path = Path(__file__).resolve().parents[1] / "config" / "place_groups.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
 
 
 def get_engine(graph_path: Path = DEFAULT_GRAPH) -> RaptorEngine:
@@ -117,6 +126,10 @@ def _resolve_place(g: Graph, value: str) -> list[int]:
     m = _COORDS_RE.match(value)
     if m:
         return _nearest_stops(g, float(m.group(1)), float(m.group(2)))
+    if value.startswith("place_group:"):
+        key = value.removeprefix("place_group:")
+        if key in g.place_groups:
+            return list(g.place_groups[key])
     idxs = g.resolve_place(value)
     if not idxs:
         suggestions = [name for _, name in g.find_stops(value)[:3]]
@@ -273,6 +286,20 @@ def stations_search(
 ) -> dict:
     g = get_engine().graph
     hits = g.find_stops(q)[:limit]
+    qn = normalize(q)
+    groups = []
+    for key, spec in _load_place_groups().items():
+        aliases = spec.get("aliases", [])
+        if qn and (qn == normalize(key) or any(qn in normalize(a) for a in aliases)):
+            groups.append(
+                {
+                    "kind": "place_group",
+                    "place_group": key,
+                    "name": spec.get("label", key),
+                    "station_count": len(g.place_groups.get(key, [])),
+                    "stop_area_ids": [_bare(g.stops[i].id) for i in g.place_groups.get(key, [])],
+                }
+            )
     return {
         "stations": [
             {
@@ -284,7 +311,8 @@ def stations_search(
                 "trainline_slug": trainline.slug_for(g.stops[idx].id),
             }
             for idx, _ in hits
-        ]
+        ],
+        "place_groups": groups,
     }
 
 
@@ -319,8 +347,8 @@ def journeys(
     vehicle: str = Query("train_only", pattern="^(all|train_only)$",
                          description="Mode de recherche : train_only (défaut, pas de cars TER) ou all (avec cars TER)"),
     count: int = Query(5, ge=1, le=20),
-    sort: str = Query("departure", pattern="^(departure|duration)$",
-                      description="Tri des résultats : departure (heure de départ, défaut) ou duration (le plus court d'abord)"),
+    sort: str = Query("transfers", pattern="^(departure|duration|transfers)$",
+                      description="Tri des résultats : transfers (le moins de correspondances d'abord, défaut), departure (heure de départ) ou duration (le plus court d'abord)"),
     use_realtime: bool = Query(True, description="T8 — appliquer les retards/suppressions GTFS-RT (par défaut, les retards réels sont la réalité affichée)"),
     cards: str = Query("", description="T11 — cartes de réduction TER (ids Trainline, séparés par des virgules). Appliquées au lien de réservation trajet total."),
 ) -> dict:
@@ -341,10 +369,14 @@ def journeys(
     else:
         journeys = engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
 
-    # Tri : par départ (défaut) ou par durée (« le plus court de la journée » :
-    # le moteur couvre un horizon de 36 h, le plus court figure donc parmi les
-    # solutions Pareto si on trie par durée avant la troncature à `count`).
-    if sort == "duration":
+    # Tri : §8.2 — par défaut le moins de correspondances d'abord (même trajet
+    # plus long) ; sinon par départ ou par durée (« le plus court de la
+    # journée » : le moteur couvre un horizon de 36 h, le plus court figure
+    # donc parmi les solutions Pareto si on trie par durée avant la troncature
+    # à `count`).
+    if sort == "transfers":
+        journeys = sorted(journeys, key=lambda j: (j.transfers, j.departure, j.arrival))[:count]
+    elif sort == "duration":
         journeys = sorted(journeys, key=lambda j: (j.duration_min, j.departure, j.arrival))[:count]
     else:
         journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]

@@ -100,6 +100,74 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(j["legs"][0]["line"], "K4")
         self.assertEqual(j["legs"][0]["from"]["name"], "Paris Est")
 
+    def test_journeys_ville_multi_gares_lyon(self):
+        # §5.3 — « Lyon » (pas une gare unique) résout le groupe entier : la
+        # première solution part d'une gare du groupe (ici direct K14 depuis
+        # Lyon Part Dieu).
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Lyon", "to": "Valence Ville", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        self.assertEqual(j["transfers"], 0)
+        self.assertEqual(j["legs"][0]["from"]["name"], "Lyon Part Dieu")
+
+    def test_journeys_dijon_et_dijon_toutes_gares(self):
+        # §5.3 — « Dijon » est une gare unique (recherche ciblée) ; « Dijon
+        # toutes gares » étend la recherche à tout le groupe (Dijon Porte
+        # Neuve). Le premier résultat d'une gare homonyme reste la gare.
+        r1 = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Mulhouse", "date": DATE, "time": "08:00"},
+        )
+        self.assertEqual(r1.status_code, 200)
+        j1 = r1.json()["journeys"][0]
+        self.assertEqual(j1["legs"][0]["from"]["name"], "Dijon")
+        r2 = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon toutes gares", "to": "Mulhouse", "date": DATE, "time": "08:00"},
+        )
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json()["journeys"])
+
+    def test_stations_search_place_group(self):
+        # §5.3 — l'autocomplete expose le groupe « Lyon toutes gares ».
+        r = self.client.get("/v1/stations/search", params={"q": "lyon"})
+        self.assertEqual(r.status_code, 200)
+        groups = r.json().get("place_groups", [])
+        names = [g["name"] for g in groups]
+        self.assertIn("Lyon", names)
+
+    def test_sort_transfers_par_defaut(self):
+        # §8.2 — le tri par défaut favorise le moins de correspondances, même
+        # si la solution est plus longue qu'une autre (davantage de
+        # correspondances).
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Lyon Part Dieu", "to": "Lille Flandres", "date": DATE, "time": "07:00", "count": 10},
+        )
+        self.assertEqual(r.status_code, 200)
+        js = r.json()["journeys"]
+        self.assertTrue(js)
+        tr = [j["transfers"] for j in js]
+        self.assertEqual(tr, sorted(tr), "les trajets ne sont pas triés par nombre de correspondances")
+        self.assertEqual(js[0]["transfers"], min(tr))
+
+    def test_sort_transfers_correspondances_avant_depart(self):
+        # §8.2 — sur le même couple origine/destination, le tri par
+        # correspondances et le tri par départ diffèrent (quand les deux
+        # classements ne coïncident pas, c'est le moins de correspondances qui
+        # prime par défaut).
+        base = {"from": "Lyon Part Dieu", "to": "Lille Flandres", "date": DATE, "time": "07:00", "count": 10}
+        r_dep = self.client.get("/v1/journeys", params={**base, "sort": "departure"})
+        r_tr = self.client.get("/v1/journeys", params={**base, "sort": "transfers"})
+        self.assertEqual(r_dep.status_code, 200)
+        self.assertEqual(r_tr.status_code, 200)
+        dep_first = r_dep.json()["journeys"][0]
+        tr_first = r_tr.json()["journeys"][0]
+        self.assertLessEqual(tr_first["transfers"], dep_first["transfers"])
+
     def test_journeys_aucun_resultat(self):
         # Aucun trajet TER en ≤3 correspondances -> 200 avec journeys vide (pas une erreur)
         r = self.client.get(
@@ -122,13 +190,17 @@ class ApiTestCase(unittest.TestCase):
         self.assertGreater(j["transfers"], 3)
 
     def test_journeys_marche_inter_gares(self):
+        # Le tri par défaut (§8.2) favorise le moins de correspondances : la
+        # solution avec marche inter-gares existe mais n'est plus forcément la
+        # première. On cherche donc une solution avec un premier leg à pied.
         r = self.client.get(
             "/v1/journeys",
-            params={"from": "Paris Bercy", "to": "Dijon", "date": DATE, "time": "07:00"},
+            params={"from": "Paris Bercy", "to": "Dijon", "date": DATE, "time": "07:00", "count": 20},
         )
         self.assertEqual(r.status_code, 200)
-        j = r.json()["journeys"][0]
-        self.assertEqual(j["legs"][0]["type"], "walk")
+        walked = [j for j in r.json()["journeys"] if j["legs"] and j["legs"][0]["type"] == "walk"]
+        self.assertTrue(walked, "aucune solution avec marche inter-gares trouvée")
+        j = walked[0]
         self.assertEqual(j["arrival"], "2026-08-10T10:33:00+02:00")
 
     def test_journeys_coordonnees(self):

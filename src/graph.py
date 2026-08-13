@@ -96,11 +96,15 @@ class Graph:
     search_index: dict[str, list[int]] = field(default_factory=dict)
 
     # Groupes de gares interchangeables pour la recherche (§5.5 « toutes gares »)
-    # ex. place_groups["paris"] = indices des gares principales de Paris.
+    # ex. place_groups["lyon"] = indices des gares de Lyon.
     # Le moteur de routage considère l'arrivée à N'IMPORTE QUEL membre comme une
     # arrivée au groupe ; les arcs inter-gares (paris_links) gèrent les trajets
     # entre deux gares du groupe.
     place_groups: dict[str, list[int]] = field(default_factory=dict)
+
+    # « toutes gares » : alias de recherche (normalisé, ex. « lyon toutes gares »)
+    # -> clé du groupe (ex. "lyon"). Construit depuis config/place_groups.json.
+    place_group_aliases: dict[str, str] = field(default_factory=dict)
 
     # Couverture du GTFS
     date_min: int = 0
@@ -162,15 +166,20 @@ class Graph:
     def resolve_place(self, query: str) -> list[int]:
         """Résout un lieu de recherche en une liste de gares (§5.5).
 
-        - Un groupe (« Paris », « Paris toutes gares ») → tous les membres
-          (N'importe lequel satisfait la recherche).
+        - « Ville toutes gares » (ou une ville sans gare homonyme, ex. Lyon,
+          Marseille, Lille) → tous les membres du groupe (N'importe lequel
+          satisfait la recherche).
+        - Une ville dont le nom EST une gare (ex. « Dijon ») → la gare unique ;
+          le groupe n'est demandé qu'à travers « Dijon toutes gares ».
         - Sinon → la meilleure gare unique (autocomplete).
         """
         norm = normalize(query)
-        if norm in self.place_groups:
-            return list(self.place_groups[norm])
-        if norm in PARIS_ALIASES:
-            return list(self.place_groups.get("paris", []))
+        aliases = getattr(self, "place_group_aliases", {})
+        if norm in aliases:
+            group_key = aliases[norm]
+            if norm in self.search_index:
+                return [self.search_index[norm][0]]
+            return list(self.place_groups.get(group_key, []))
         hits = self.find_stops(query)
         return [idx for idx, _ in hits[:1]]
 
@@ -207,21 +216,31 @@ ALIASES: dict[str, list[str]] = {
     "paris est": ["paris est"],
 }
 
-# ------------------------------------------------- groupe « toutes gares »
-# §5.5 : gares principales d'une ville traitées comme interchangeables pour la
-# recherche (« Paris », « Paris toutes gares »). Le build_graph résout ces noms
-# en indices réels dans Graph.place_groups.
-PARIS_STATION_NAMES: tuple[str, ...] = (
-    "Paris Est",
-    "Paris Gare du Nord",
-    "Paris Saint-Lazare",
-    "Paris Montparnasse Hall 1 - 2",
-    "Paris Austerlitz",
-    "Paris Gare de Lyon Hall 1 - 2",
-    "Paris Bercy Bourg. Pays d'Auv.",
-)
 
-# Alias de recherche qui désignent le groupe entier (normalisés sans accents).
-PARIS_ALIASES: frozenset[str] = frozenset(
-    {"paris", "paris toutes gares", "paris tous", "toutes gares"}
-)
+def build_place_groups(g: Graph, config: dict) -> None:
+    """Remplit `g.place_groups` / `g.place_group_aliases` depuis
+    config/place_groups.json : `{clé_ville: {label, aliases, stations}}`.
+
+    Les gares listées mais absentes du GTFS sont ignorées (l'appelant peut
+    vérifier les tailles). La gare homonyme de la ville (ex. « Dijon ») est
+    placée en tête du groupe pour être le premier résultat affiché.
+    """
+    g.place_groups = {}
+    g.place_group_aliases = {}
+    index = {normalize(s.name): idx for idx, s in enumerate(g.stops)}
+    for key, spec in config.items():
+        found = []
+        for name in spec.get("stations", []):
+            idx = index.get(normalize(name))
+            if idx is not None:
+                found.append(idx)
+        if not found:
+            continue
+        main = index.get(normalize(key))
+        if main is not None and main in found:
+            found = [main] + sorted(i for i in found if i != main)
+        else:
+            found = sorted(found)
+        g.place_groups[key] = found
+        for alias in spec.get("aliases", []):
+            g.place_group_aliases[normalize(alias)] = key
