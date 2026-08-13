@@ -291,8 +291,21 @@ def stations_search(
 @app.get("/v1/cards", tags=["itinéraires"])
 def cards_list() -> dict:
     """T11 — cartes de réduction TER (Trainline, displayGroup=sncf_regional).
-    Ids envoyés en `cards` sur /v1/journeys pour le lien trajet total."""
-    return {"cards": trainline_cards.cards()}
+
+    T12 — chaque carte est enrichie de sa région d'application et de son taux
+    de réduction estimé (`pay` = fraction du plein tarif payée, `discount_pct`
+    = % affiché ; None pour abonnements/pass sans réduction par billet)."""
+    get_engine()  # garantit `_pricing` chargé (carte -> région/taux)
+    cards = []
+    for c in trainline_cards.cards():
+        info = _pricing.card_info(c) if _pricing is not None else {}
+        c = dict(c)
+        c["region"] = info.get("region", "INCONNUE")
+        pay = info.get("pay")
+        c["pay"] = pay
+        c["discount_pct"] = round((1 - pay) * 100) if pay is not None else None
+        cards.append(c)
+    return {"cards": cards}
 
 
 @app.get("/v1/journeys", tags=["itinéraires"])

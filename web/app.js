@@ -96,19 +96,98 @@ function setupAutocomplete(inputEl, listEl) {
 setupAutocomplete(fromInput, $("#from-suggestions"));
 setupAutocomplete(toInput, $("#to-suggestions"));
 
-/* T12 — cartes de réduction TER : sélecteur alimenté par /v1/cards. La carte
-   choisie est envoyée en `cards=` : l'API renvoie alors price_reduced_eur. */
-const cardSelect = $("#card");
+/* T12 — cartes de réduction TER : menu multi-sélection alimenté par
+   /v1/cards (regroupées par région). Les cartes cochées sont envoyées en
+   `cards=id,id…` : l'API renvoie price_reduced_eur (meilleure carte par
+   région) et pricing.cards (cartes réellement appliquées). */
+const cardMenu = $("#cards-menu");
+const cardToggle = $("#cards-toggle");
+const cardPanel = $("#cards-panel");
+const selectedCards = new Set();
+let allCards = [];
+let cardsByRegion = [];
+
+function cardLabel(c) {
+  if (c.discount_pct == null) return `${c.shortName || c.name} · abonnement/pass`;
+  return `${c.shortName || c.name} (−${c.discount_pct} %)`;
+}
+
+function renderCardsPanel() {
+  cardPanel.innerHTML = "";
+  cardsByRegion.forEach(([region, list]) => {
+    const group = document.createElement("li");
+    group.className = "cards-group";
+    const head = document.createElement("div");
+    head.className = "cards-region";
+    head.textContent = region;
+    group.appendChild(head);
+    list.forEach((c) => {
+      const li = document.createElement("li");
+      const label = document.createElement("label");
+      label.className = "cards-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = c.id;
+      cb.checked = selectedCards.has(c.id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selectedCards.add(c.id);
+        else selectedCards.delete(c.id);
+        updateCardsToggle();
+      });
+      const span = document.createElement("span");
+      span.textContent = cardLabel(c);
+      span.title = c.name;
+      label.appendChild(cb);
+      label.appendChild(span);
+      li.appendChild(label);
+      group.appendChild(li);
+    });
+    cardPanel.appendChild(group);
+  });
+  updateCardsToggle();
+}
+
+function updateCardsToggle() {
+  if (selectedCards.size === 0) {
+    cardToggle.textContent = "— sans carte de réduction —";
+  } else if (selectedCards.size === 1) {
+    const c = allCards.find((x) => x.id === [...selectedCards][0]);
+    cardToggle.textContent = c ? cardLabel(c) : "1 carte sélectionnée";
+  } else {
+    cardToggle.textContent = `${selectedCards.size} cartes sélectionnées`;
+  }
+  cardToggle.classList.toggle("selected", selectedCards.size > 0);
+}
+
+function toggleCardsPanel(open) {
+  cardPanel.toggleAttribute("hidden", !open);
+  cardToggle.setAttribute("aria-expanded", String(open));
+}
+
+cardToggle.addEventListener("click", (e) => {
+  e.preventDefault();
+  toggleCardsPanel(cardPanel.hidden);
+});
+
+document.addEventListener("click", (e) => {
+  if (!cardMenu.contains(e.target)) toggleCardsPanel(false);
+});
+
 fetch(API_BASE + "/v1/cards")
   .then((r) => (r.ok ? r.json() : Promise.reject()))
   .then((body) => {
-    body.cards.forEach((c) => {
-      const opt = document.createElement("option");
-      opt.value = c.id;
-      opt.textContent = c.shortName || c.name;
-      opt.title = c.name;
-      cardSelect.appendChild(opt);
+    allCards = body.cards;
+    const byRegion = new Map();
+    allCards.forEach((c) => {
+      const r = (c.region && c.region !== "INCONNUE") ? c.region : "Autre";
+      if (!byRegion.has(r)) byRegion.set(r, []);
+      byRegion.get(r).push(c);
     });
+    cardsByRegion = [...byRegion.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "fr"))
+      .map(([region, list]) => [region, [...list].sort((a, b) =>
+        (a.shortName || a.name).localeCompare(b.shortName || b.name, "fr"))]);
+    renderCardsPanel();
   })
   .catch(() => {});
 
@@ -317,7 +396,7 @@ async function search(timeShiftMin = 0) {
     sort: sortBy,
     count: sortBy === "duration" ? "10" : "5",
   });
-  if (cardSelect.value) params.set("cards", cardSelect.value);
+  if (selectedCards.size) params.set("cards", [...selectedCards].join(","));
 
   try {
     const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);

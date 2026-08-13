@@ -54,10 +54,13 @@
           </div>
         </div>
         <div class="field">
-          <label for="card">Carte de réduction</label>
-          <select id="card" name="card">
-            <option value="">— sans carte de réduction —</option>
-          </select>
+          <span class="field-label" id="cards-label">Cartes de réduction</span>
+          <div class="cards-menu" id="cards-menu">
+            <button type="button" id="cards-toggle" class="cards-toggle"
+                    aria-haspopup="true" aria-expanded="false"
+                    aria-labelledby="cards-label">— sans carte de réduction —</button>
+            <ul id="cards-panel" class="cards-panel" role="menu" aria-labelledby="cards-label" hidden></ul>
+          </div>
         </div>
         <button type="submit" id="search-button">Rechercher</button>
       </form>
