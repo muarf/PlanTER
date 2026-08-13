@@ -12,6 +12,7 @@ Voir `walkthrough.md` §T11. Les données sont statiques (config/), rafraîchies
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,6 +25,14 @@ DEFAULT_PASSENGER_DOB = "1993-08-12"
 
 # Pid Trainline généré par le front (1er passager).
 _PID = "pid-0"
+
+# Les cartes TER de l'API Trainline sont identifiées par un hash 40-hex.
+# Les cartes sociales absentes du catalogue Trainline (SolidariO', illico
+# SOLIDAIRE…) portent un id local non hexadécimal : le calcul de réduction
+# reste possible, mais elles ne peuvent pas être pré-remplies dans l'URL de
+# réservation (Trainline ne les connaît pas et ignore de toute façon les
+# `passengerDiscountCards[]` d'une URL, cf. walkthrough.md §T11).
+_TRAINLINE_HASH = re.compile(r"^[0-9a-f]{40}$")
 
 
 @lru_cache(maxsize=1)
@@ -64,14 +73,17 @@ def booking_url(base_url: str, card_ids: list[str], passenger_dob: str | None = 
 
     `passengers[]=<DOB>|pid-0` est requis dès qu'une carte est sélectionnée
     (Trainline calcule l'âge). Sans DOB explicite, on utilise la DOB par défaut.
-    Sans carte, l'URL est retournée inchangée.
+    Sans carte, l'URL est retournée inchangée. Seules les cartes portant un
+    hash Trainline réel (id 40-hex) sont ajoutées à l'URL ; les cartes locales
+    sans hash Trainline (SolidariO', illico SOLIDAIRE…) n'y figurent pas.
     """
-    if not card_ids:
+    hash_ids = [cid for cid in card_ids if _TRAINLINE_HASH.match(cid)]
+    if not hash_ids:
         return base_url
     dob = passenger_dob or DEFAULT_PASSENGER_DOB
     sep = "&" if "?" in base_url else "?"
     parts = [base_url]
-    for cid in card_ids:
+    for cid in hash_ids:
         parts.append(f"passengerDiscountCards[]={cid}")
     parts.append(f"passengers[]={dob}|{_PID}")
     return sep.join(parts)

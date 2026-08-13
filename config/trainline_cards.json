@@ -78,6 +78,15 @@
     "shortName": "illico MOBILITÉ"
   },
   {
+    "id": "illico-solidaire",
+    "name": "Carte Auvergne-Rhône-Alpes illico SOLIDAIRE",
+    "shortName": "illico SOLIDAIRE",
+    "ageRange": {
+      "lowerBound": 12,
+      "upperBound": 300
+    }
+  },
+  {
     "id": "5be729fcfc26caa921c53f6d836175d832c288ca",
     "name": "Carte Bourgogne-Franche-Comté 26+",
     "shortName": "26+",
@@ -219,6 +228,11 @@
       "lowerBound": 26,
       "upperBound": 300
     }
+  },
+  {
+    "id": "solidario-occitanie",
+    "name": "Tarif SolidariO' (Carte Solidaire Occitanie)",
+    "shortName": "SolidariO'"
   },
   {
     "id": "878203046e7fc460ca6bdbe39b2651a8878e83ee",

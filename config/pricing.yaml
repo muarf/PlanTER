@@ -93,6 +93,10 @@ cards:
       pay: 0.50
     "1624b700646c683164a031f0209cc1f8752a396a":   # Nouvelle-Aquitaine Solidaire : -50 %
       pay: 0.50
+    "illico-solidaire":                            # ARA illico SOLIDAIRE (id local, pas chez Trainline) : -75 %
+      pay: 0.25
+    "solidario-occitanie":                         # Occitanie SolidariO' (id local, pas chez Trainline) : -75 %
+      pay: 0.25
 
   # Région d'application d'une carte, déduite de son nom.
   region_keywords:
