@@ -1475,7 +1475,7 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
 - **API (Uvicorn / FastAPI)** :
   - Modification de `/etc/systemd/system/ter-finder-pricing.service` pour ajouter l'option `--no-access-log` à Uvicorn. Les requêtes HTTP ne sont plus enregistrées dans le journal système.
 - **Politique de confidentialité** :
-  - Mise à jour de [privacy.html](file:///home/ubuntu/ter-finder-pricing/web/privacy.html) (section *Côté serveur*) pour refléter cette absence totale de logs de connexion et expliquer le rôle éphémère du routage d'Oracle Cloud / FAI.
+  - Mise à jour de [privacy.html](file:///home/ubuntu/ter-finder-pricing/web/privacy.html) (section *Côté serveur*) pour refléter cette absence totale de logs de connexion, expliquer le rôle éphémère du routage d'Oracle Cloud / FAI, et préciser de façon transparente que sous réquisition légale ou décision de justice, les IPs peuvent être loguées au niveau du réseau intermédiaire mais sans aucune visibilité sur le contenu des recherches grâce au chiffrement HTTPS.
 
 **Validation.**
 - Rechargement de systemd, redémarrage de `ter-finder-pricing.service` et rechargement de Nginx.
