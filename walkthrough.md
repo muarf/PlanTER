@@ -1084,3 +1084,25 @@ liens officiels corrects, nouvelles cartes présentes. Le service beta
 **Mise à jour prod.** `web/cards.html` est servi statiquement ; prod
 (`ter-finder.service`, port 8000, ter.zvz.fr) est mise à jour par `git pull`
 puis redémarrage du service.
+
+## 31. T12 — Vérification des pourcentages de réduction sur la recherche d'itinéraire (13/08/2026)
+
+**Contexte.** Les taux représentatifs des cartes (§29) sont exposés à l'utilisateur
+de deux manières : page « comment obtenir chaque carte » (§30, `web/cards.html`)
+et recherche d'itinéraire (sélecteur de carte + `price_reduced_eur`).
+
+**Vérification (beta, 13/08/2026).** Parcours de la recherche d'itinéraire sur
+https://betater.zvz.fr : les pourcentages de réduction affichés correspondent
+aux taux du modèle `config/pricing.yaml` et à ceux de la page cartes.
+
+Le champ `discount_pct` de l'API `/v1/cards` est dérivé de `pay` :
+`discount_pct = (1 − pay) × 100`. Exemples relevés :
+- ARA : illico SOLIDAIRE −75 %, illico MOBILITÉ −50 %, illico LIBERTÉ −60 % ;
+- Occitanie : SolidariO' −75 %, LibertiO' −50 % ;
+- PDL : mobi 75 % → −75 %, mobi 50 %/mezzo → −50 % ;
+- Région Sud : ZOU! Solidaire + −90 %, ZOU! Malin −30 %, ZOU! −26 −50 % ;
+- BFC : Tarif réduit solidaire −75 %, Mobigo+ 26+ −60 % ;
+- HdF/Normandie/Grand Est/NA/CVL : −50 % (Ma Carte TER, Tempo, Fluo, Carte +, Rémi).
+
+Ces valeurs s'appliquent au calcul de `price_reduced_eur` dans `/v1/journeys`
+(uniquement sur les segments de la région de la carte, §29).
