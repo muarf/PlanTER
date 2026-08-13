@@ -75,28 +75,34 @@ cards:
     - {contains: "tempo",        pay: 0.40}   # Normandie Tempo : 50 % we / 25 % semaine
     - {contains: "mezzo",        pay: 0.50}   # PDL mezzo / mezzo-26 : -50 %
     - {contains: "liberto",      pay: 0.40}   # Occitanie LibertiO' : 50 % we / 30 % semaine
-    - {contains: "illico mobilité", pay: 0.50}  # ARA illico MOBILITÉ (solidaire) : -50 %
-    - {contains: "illico liberté", pay: 0.40}   # ARA illico LIBERTÉ : 50 % we / 25 % semaine
+    - {contains: "illico mobilité", pay: 0.10}  # ARA illico MOBILITÉ : -90 %
+    - {contains: "illico liberté", pay: 0.50}   # ARA illico LIBERTÉ : -25 % sem / -50 % we
     - {contains: "rémi",         pay: 0.50}   # Centre-Val de Loire Rémi (Liberté/Jeune/Sénior/Plus)
     - {contains: "carte +",      pay: 0.50}   # Nouvelle-Aquitaine Carte + : -50 %
     - {contains: "zou",          pay: 0.70}   # ZOU! : -30 % (jeunes/solidaire déjà matchés avant)
 
   # Dérogations explicites par id Trainline (les motifs ne suffisent pas).
   by_id:
-    "d55f73482d9d2d0f7ccc92b83a13cc0a9b1d788d":   # Carte Région Sud ZOU! Études (pass, trajets illimités)
-      type: none
+    "d55f73482d9d2d0f7ccc92b83a13cc0a9b1d788d":   # Carte Région Sud ZOU! Études : -50 % autres trajets
+      pay: 0.50
     "b7d4997c6167068b9e04c96482c0479aeabb86a6":   # Pass ZOU! Études
       type: none
     "2a730e22c0be4cf0030f89205f540fe39e8dca6b":   # BFC tarif réduit solidaire : -75 %
       pay: 0.25
-    "9af6d24373bf3ceb196aa654156dae36ac5ca1aa":   # Grand Est Solidaire : -50 %
-      pay: 0.50
-    "1624b700646c683164a031f0209cc1f8752a396a":   # Nouvelle-Aquitaine Solidaire : -50 %
-      pay: 0.50
+    "9af6d24373bf3ceb196aa654156dae36ac5ca1aa":   # Grand Est Solidaire : -80 %
+      pay: 0.20
+    "1624b700646c683164a031f0209cc1f8752a396a":   # Nouvelle-Aquitaine Solidaire : -80 %
+      pay: 0.20
     "illico-solidaire":                            # ARA illico SOLIDAIRE (id local, pas chez Trainline) : -75 %
       pay: 0.25
     "solidario-occitanie":                         # Occitanie SolidariO' (id local, pas chez Trainline) : -75 %
       pay: 0.25
+    "3b2fb763e7cfadeee83c80dd503184c684f33ff6":   # Carte Normandie Tempo +26 : -25 % sem / -50 % we
+      pay: 0.50
+    "470ae6fd30e42fdf19ea56229115a9c83a669b01":   # Carte Normandie Tempo Paris +26 : -25 % sem / -50 % we
+      pay: 0.50
+    "315a57d01f5e75c635231599b8795fc196b4671d":   # Carte Grand-Est Primo (abonnement, illimité) : sans %
+      type: none
 
   # Région d'application d'une carte, déduite de son nom.
   region_keywords:

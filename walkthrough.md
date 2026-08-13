@@ -1011,12 +1011,16 @@ interne de T12 s'en charge : il calcule lui-même le tarif réduit.
   solidaire : 75 % → 0,25 ;
 - Hauts-de-France Ma Carte TER / -26 : 50 % → 0,50 ;
 - PDL mezzo/mezzo-26 : 50 % ; mobi 50 % → 0,50 ; mobi 75 % → 0,25 ;
-- ARA illico LIBERTÉ : 25 % sem / 50 % we → 0,40 ; illico JEUNES/MOBILITÉ : 0,50 ;
+- ARA illico LIBERTÉ : -25 % sem / -50 % we → 0,50 ; illico JEUNES : 0,50 ;
+  illico MOBILITÉ : -90 % → 0,10 ;
 - Occitanie LibertiO' : 50 % we / 30 % sem → 0,40 ;
-- Grand Est Fluo / Fluo Jeune : 50 % ;
-- Région Sud : ZOU! Malin -30 % (0,70), Solidaire -50 % (0,50), Solidaire + -90 % (0,10) ;
-- Normandie Tempo : 25 % sem / 50 % we → 0,40 ;
-- Nouvelle-Aquitaine Carte + : 50 % ; Centre-Val Rémi : 50 %.
+- Grand Est Fluo / Fluo Jeune : 50 % ; Solidaire : -80 % → 0,20 ;
+- Région Sud : ZOU! Malin -30 % (0,70), Solidaire -50 % (0,50), Solidaire + -90 %
+  (0,10), Études -50 % (0,50) ;
+- Normandie Tempo : -25 % sem / -50 % we → 0,50 (Carte +26 et Tempo Paris +26) ;
+- Nouvelle-Aquitaine Carte + : 50 %, Solidaire : -80 % → 0,20 ; Centre-Val Rémi : 50 % ;
+- Bretagne BreizhGo Solidaire : tarifs fixes (jusqu'à -75 %), représentatif 0,50 ;
+  Grand Est Primo (abonnement illimité) : sans réduction (type none).
 
 **Règle d'application.** Une carte ne réduit QUE les segments de sa région :
 - mono-région : réduction sur le billet global dégressif ;
@@ -1097,7 +1101,8 @@ aux taux du modèle `config/pricing.yaml` et à ceux de la page cartes.
 
 Le champ `discount_pct` de l'API `/v1/cards` est dérivé de `pay` :
 `discount_pct = (1 − pay) × 100`. Exemples relevés :
-- ARA : illico SOLIDAIRE −75 %, illico MOBILITÉ −50 %, illico LIBERTÉ −60 % ;
+- ARA : illico SOLIDAIRE −75 %, illico MOBILITÉ −90 %, illico LIBERTÉ −50 %
+  (cohérent avec cards.html) ;
 - Occitanie : SolidariO' −75 %, LibertiO' −50 % ;
 - PDL : mobi 75 % → −75 %, mobi 50 %/mezzo → −50 % ;
 - Région Sud : ZOU! Solidaire + −90 %, ZOU! Malin −30 %, ZOU! −26 −50 % ;
@@ -1106,3 +1111,15 @@ Le champ `discount_pct` de l'API `/v1/cards` est dérivé de `pay` :
 
 Ces valeurs s'appliquent au calcul de `price_reduced_eur` dans `/v1/journeys`
 (uniquement sur les segments de la région de la carte, §29).
+
+**Correction (13/08/2026).** Contrôle carte par carte cards.html ↔ recherche : le
+
+modèle appliquait des taux erronés sur illico MOBILITÉ (−90 % vs −50 %),
+
+Solidaires Grand Est et Nouvelle-Aquitaine (−80 % vs −50 %), Tempo +26 et
+
+Tempo Paris +26 (−60 % vs −25/−50 %), illico LIBERTÉ (−60 % vs −25/−50 %),
+
+ZOU! Études (−50 % vs aucune) et Primo (aucune vs −50 %). `config/pricing.yaml`
+
+mis à jour pour être cohérent avec cards.html ; vérifié sur la beta.

@@ -143,10 +143,10 @@ class PricingTestCase(unittest.TestCase):
         info = self.pe.card_info({"id": ABO_TEMPO, "name": "Abonnement Normandie Tempo +26"})
         self.assertIsNone(info["pay"])
 
-    def test_card_info_pass_etudes_sans_reduction(self):
-        # Pass ZOU! Études (trajets illimités) : pas de réduction par billet.
+    def test_card_info_zou_etudes_moins_50(self):
+        # Carte ZOU! Études : -50 % sur les autres trajets (cohérent cards.html).
         info = self.pe.card_info({"id": ZOU_ETUDES, "name": "Carte Région Sud (PACA) ZOU! Études"})
-        self.assertIsNone(info["pay"])
+        self.assertEqual(info["pay"], 0.5)
         self.assertEqual(info["region"], "Provence-Alpes-Côte d'Azur")
 
     def test_card_info_region_inconnue(self):
