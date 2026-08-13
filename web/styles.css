@@ -206,6 +206,17 @@ footer { max-width: 44rem; margin: 2rem auto 1.5rem; padding: 0 1rem;
   color: var(--muted); font-size: 0.85rem; }
 footer a { color: var(--ter-dark); }
 
+/* ----------------------------------------------------- page cartes (T12) */
+.regions-nav { list-style: none; margin: 0; padding: 0; columns: 2; gap: 0.25rem 1rem; }
+.regions-nav a { color: var(--ter-dark); }
+section > h2 { margin-top: 1.4rem; font-size: 1.15rem; }
+dl.off { margin: 0; display: grid; grid-template-columns: minmax(5.5rem, auto) 1fr;
+  gap: 0.35rem 0.9rem; }
+dl.off dt { font-weight: 700; font-size: 0.9rem; }
+dl.off dd { margin: 0; font-size: 0.9rem; }
+dl.off a { color: var(--ter-dark); }
+@media (max-width: 480px) { .regions-nav { columns: 1; } }
+
 @media (min-width: 640px) {
   #search-form { grid-template-columns: 1fr 1fr; }
   #search-form button { grid-column: 1 / -1; }

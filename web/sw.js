@@ -6,6 +6,8 @@ const SHELL = [
   "/",
   "/styles.css",
   "/app.js",
+  "/cards.html",
+  "/privacy.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png"
@@ -93,7 +95,8 @@ self.addEventListener("fetch", (event) => {
 
   /* Assets du shell : cache-first. */
   if (url.pathname.startsWith("/styles.css") || url.pathname.startsWith("/app.js") ||
-      url.pathname.startsWith("/icon-") || url.pathname === "/manifest.webmanifest") {
+      url.pathname.startsWith("/icon-") || url.pathname === "/manifest.webmanifest" ||
+      url.pathname === "/cards.html" || url.pathname === "/privacy.html") {
     event.respondWith(networkFirst(req, CACHE));
   }
 });
