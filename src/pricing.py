@@ -328,6 +328,12 @@ class PricingEngine:
                 reduced += self._discount(fare, pay) if pay is not None else fare
             price_reduced_eur = round(reduced, 2)
 
+        # Référence « billet unique » (mono/pluri), conservée dans split pour
+        # l'affichage ; quand un train est découpé, le prix affiché devient le
+        # total des billets découpés (le billet unique n'est pas vendable).
+        single_full = total_eur
+        single_reduced = price_reduced_eur
+
         # §32 — annonce du découpage intra-train : gares de jonction et
         # billetterie par segment régional (chaque segment tarifé avec la
         # meilleure carte de sa région). `price_reduced_eur` reste inchangé.
@@ -360,7 +366,13 @@ class PricingEngine:
                 "segments": segments_out,
                 "price_split_eur": round(price_split, 2),
                 "price_reduced_split_eur": round(price_split_reduced, 2),
+                "single_ticket_eur": round(single_full, 2),
+                "single_ticket_reduced_eur": round(single_reduced, 2),
             }
+
+        if split is not None:
+            total_eur = split["price_split_eur"]
+            price_reduced_eur = split["price_reduced_split_eur"]
 
         return {
             "rule": rule,

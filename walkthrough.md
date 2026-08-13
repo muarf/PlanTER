@@ -1145,9 +1145,11 @@ région par train — la majorité de ses arrêts).
 - `journey_price` ajoute `pricing.split` dès qu'un leg traverse plusieurs
   régions : `junction_stations` (ex. `["Mâcon"]`), `regions`, `segments[]`
   (région, gares, km, tarif plein et réduit de la meilleure carte de la région)
-  et `price_split_eur` / `price_reduced_split_eur`. Le prix affiché
-  `price_reduced_eur` reste inchangé (billet unique dégressif, mono/pluri) :
-  le découpage est annoncé comme optimisation, pas substitué.
+  et `price_split_eur` / `price_reduced_split_eur`. Quand un train est
+  découpé, `price_normal_eur` et `price_reduced_eur` affichés deviennent le
+  total découpé (le billet unique n'est pas vendable en réalité) ; le billet
+  unique dégressif est conservé en référence dans `split.single_ticket_eur` et
+  `split.single_ticket_reduced_eur`.
 
 **API.** Pour chaque segment découpé, `/v1/journeys` expose un `booking`
 Trainline (date/heure du segment, meilleure carte de sa région ajoutée à
@@ -1162,8 +1164,8 @@ réservation, plus le total découpé.
 **Exemple vérifié (K7 07:34, Paris GDL → Lyon Part Dieu, 13/08/2026).**
 BFC solidaire + illico solidaire : jonction à Mâcon ; billet 1 Paris → Mâcon
 (460 km, ≈ 43,90 € → 10,95 €), billet 2 Mâcon → Lyon Part Dieu (74,8 km,
-≈ 17,20 € → 4,30 €) ; total découpé ≈ 61,10 € plein tarif → 15,25 € réduit.
-Le prix mono-région (billet unique dégressif BFC) reste ≈ 47,55 € → 11,90 €.
+≈ 17,20 € → 4,30 €) ; affiché ≈ 61,10 € → 15,25 € (billet unique de référence
+≈ 47,55 € → 11,90 €).
 
 **Tests.** `test_k7_paris_lyon_jonction_macon`,
 `test_k7_paris_lyon_split_annonce_et_deux_cartes`,

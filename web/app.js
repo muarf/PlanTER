@@ -290,9 +290,11 @@ function priceBlock(j) {
     .map((l) => `<div class="price-leg"><span class="price-leg-line">${l.line}</span>
       <span>${l.km} km</span><span class="price-leg-region">${l.region}</span></div>`)
     .join("");
-  const rule = j.pricing.rule === "mono_region"
-    ? "un seul billet dégressif sur la distance totale"
-    : "un billet par tronçon, sommé";
+  const rule = j.pricing.split
+    ? "billets découpés par région, sommé"
+    : j.pricing.rule === "mono_region"
+      ? "un seul billet dégressif sur la distance totale"
+      : "un billet par tronçon, sommé";
   const cards = (j.pricing.cards || [])
     .map((c) => `<span class="price-card">${c.shortName} (−${Math.round((1 - c.pay) * 100)} %)</span>`)
     .join("");
@@ -314,6 +316,7 @@ function priceBlock(j) {
     splitBlock = `<div class="price-detail split-note">
       <div class="price-rule">Ce train traverse ${sp.regions.join(" et ")} : pour utiliser la carte de chaque région, découpez le billet à ${sp.junction_stations.join(" / ")}.</div>
       ${segs}
+      ${sp.single_ticket_eur != null ? `<div class="price-rule">Billet unique (si vendu en une fois) : ≈ ${fmtPrice(sp.single_ticket_eur)}${sp.single_ticket_reduced_eur < sp.single_ticket_eur ? ` → ${fmtPrice(sp.single_ticket_reduced_eur)}` : ""}</div>` : ""}
       <div class="price-split-total">Total billets découpés : ≈ <strong>${fmtPrice(sp.price_reduced_split_eur)}</strong> (plein tarif ${fmtPrice(sp.price_split_eur)})</div>
     </div>`;
   }

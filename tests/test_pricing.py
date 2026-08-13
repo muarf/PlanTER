@@ -204,11 +204,14 @@ class PricingTestCase(unittest.TestCase):
         info, j = found
         base = self.pe.journey_price(j)
         self.assertLess(info["price_reduced_eur"], base["price_normal_eur"])
-        # le tronçon normand reste au plein tarif : la réduction ne porte que
-        # sur le tronçon haut-de-français (pay 0.50).
-        hdf_km = next(l["km"] for l in base["legs"] if l["region"] == "Hauts-de-France")
-        norm_km = next(l["km"] for l in base["legs"] if l["region"] == "Normandie")
-        expected = round(round(self.pe.fare(hdf_km, "Hauts-de-France") * 0.5 / 0.05) * 0.05, 2) + self.pe.fare(norm_km, "Normandie")
+        # prix réduit = somme des segments ; chaque segment Hauts-de-France est
+        # à -50 %, les segments Normandie restent pleins. (Le train
+        # Amiens->Rouen traverse la frontière : il est découpé à Formerie.)
+        segs = base["split"]["segments"] if base.get("split") else base["legs"]
+        expected = 0.0
+        for seg in segs:
+            fare = self.pe.fare(seg["km"], seg["region"])
+            expected += self.pe._discount(fare, 0.5) if seg["region"] == "Hauts-de-France" else fare
         self.assertAlmostEqual(info["price_reduced_eur"], round(expected, 2), delta=0.01)
 
     # ------------------------------------------------------- §32 split intra-train
@@ -268,12 +271,17 @@ class PricingTestCase(unittest.TestCase):
         self.assertAlmostEqual(seg1["fare_reduced_eur"], round(seg1["fare_eur"] * 0.25, 2), delta=0.05)
         self.assertAlmostEqual(seg2["fare_reduced_eur"], round(seg2["fare_eur"] * 0.25, 2), delta=0.05)
         self.assertAlmostEqual(split["price_reduced_split_eur"], round(seg1["fare_reduced_eur"] + seg2["fare_reduced_eur"], 2), delta=0.01)
-        # le prix mono-région (billet unique dégressif) est inchangé
-        plain = self.pe.journey_price(j, cards=[BFC_SOLIDAIRE])
-        self.assertEqual(info["price_reduced_eur"], plain["price_reduced_eur"])
-        # sans cartes, pas de split
+        # le prix affiché devient le total découpé (normal et réduit) ;
+        # le billet unique dégressif est conservé en référence dans split.
+        self.assertEqual(info["price_reduced_eur"], split["price_reduced_split_eur"])
+        self.assertEqual(info["price_normal_eur"], split["price_split_eur"])
+        # la référence « billet unique » conserve le prix mono-région dégressif
+        self.assertEqual(split["single_ticket_eur"], self.pe.fare(info["km"], "Bourgogne-Franche-Comté"))
+        self.assertEqual(split["single_ticket_reduced_eur"], self.pe._discount(split["single_ticket_eur"], 0.25))
+        # le découpage est annoncé même sans cartes (mais sans réduction)
         base = self.pe.journey_price(j)
-        self.assertEqual(base["price_normal_eur"], info["price_normal_eur"])
+        self.assertIsNotNone(base["split"])
+        self.assertEqual(base["price_reduced_eur"], base["price_normal_eur"])
 
     def test_paris_dijon_meme_train_pas_de_split(self):
         # Paris -> Dijon sur le même K7 ne traverse qu'une région utile (BFC) :
