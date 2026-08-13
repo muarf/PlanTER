@@ -1,4 +1,4 @@
-/* TER Finder — SPA statique : recherche, résultats, détail (§8.2). */
+/* planTER — SPA statique : recherche, résultats, détail (§8.2). */
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);

@@ -676,9 +676,10 @@ Gares non mappées (peu fréquentes) : `booking.url` vaut `null`, pas de bouton.
 
 **État au 12/08/2026.** Toutes les tâches techniques T1–T8, T10 et T11 sont livrées et validées (moteur, API, web, PWA/native, temps réel, alerting, cartes TER). Restent, par ordre d'opportunité :
 
-1. **Publication stores (§9/Phase 4)** — l'app native Capacitor (T7 v2.2) n'est **pas publiée** sur Play Store / App Store : nécessite comptes développeur (25 € une fois Google, 99 €/an Apple) + soumission manuelle. Non bloquant.
-2. **Surveillance opérationnelle** — **Livré le 12/08/2026** (T10).
-3. **Programme d'affiliation (T9/Phase 6)** — le PoC (liens Trainline + cartes TER T11) est livré ; le programme proprement dit (commission, paramètre d'affiliation, tracking) dépend d'un accord commercial, hors code.
+1. **Calculs Tarifaires et Réductions (T12/Phase 8)** — Implémenter l'estimation du tarif plein et le calcul des tarifs réduits par carte régionale via un moteur de calcul interne autonome (calculs sur distance globale et par segments).
+2. **Publication stores (§9/Phase 4)** — l'app native Capacitor (T7 v2.2) n'est **pas publiée** sur Play Store / App Store : nécessite comptes développeur (25 € une fois Google, 99 €/an Apple) + soumission manuelle. Non bloquant.
+3. **Surveillance opérationnelle** — **Livré le 12/08/2026** (T10).
+4. **Programme d'affiliation (T9/Phase 6)** — le PoC (liens Trainline + cartes TER T11) est livré ; le programme proprement dit (commission, paramètre d'affiliation, tracking) dépend d'un accord commercial, hors code.
 
 Les déploiements web/API sont documentés en §13.
 
@@ -858,7 +859,18 @@ Intégration d'un système d'alerting opérationnel complet sur Telegram.
 - Validation de l'envoi de l'alerte de test via curl (reçue avec succès sur Telegram).
 - Exécution manuelle réussie de `scripts/monitor_health.py` (aucune erreur, API saine).
 
-## 24. Exécution T11 (cartes de réduction TER) — 12/08/2026
+## 24. Modélisation de la Tarification TER (Découverte et Analyse) — 12/08/2026
+
+Analyse comportementale de la tarification régionale des TER sur des trajets avec correspondance.
+
+### Constatations clés
+1. **La dégressivité sur parcours global** : Sur un trajet mono-régional (ex: `Paris ➔ Dijon ➔ Besançon`, géré de bout en bout par la région Bourgogne-Franche-Comté), le prix est calculé sur la distance totale de 405 km en appliquant la dégressivité kilométrique. Le prix du billet unique est de **41,00 €** (alors que la somme des billets pris séparément est de 63,60 €).
+2. **La somme par rupture de convention interrégionale** : Sur un trajet pluri-régional sans convention spécifique (ex: `Lille ➔ Amiens ➔ Rouen`), la correspondance à Amiens fait passer de la région Hauts-de-France à la région Normandie. Le prix final facturé (notamment constaté à **43,00 €** sur Trainline) est la somme des deux segments régionaux séparés (22,10 € + 20,30 €).
+
+### Impacts pour l'architecture TER Finder
+Toute future fonctionnalité de tarification ne pourra pas se baser sur une simple addition des segments de voyage. L'algorithme devra déterminer les régions organisatrices de chaque étape pour décider si le barème dégressif s'applique globalement sur la distance totale cumulée ou si les tarifs par zone/région doivent être sommés de manière disjointe.
+
+## 25. Exécution T11 (cartes de réduction TER) — 12/08/2026
 
 Les cartes de réduction TER (Carte solidaire, abonnements régionaux…) ont d'abord été exposées dans le web et appliquées au **lien de réservation trajet total** vers Trainline. **Le champ web a été retiré le 12/08/2026** : Trainline n'applique pas la carte via l'URL (voir « Limite » ci-dessous). La logique serveur (`/v1/cards`, param `cards=`, `total_url`) est conservée pour plus tard.
 
@@ -896,7 +908,7 @@ curl -s "https://ter.zvz.fr/v1/journeys?from=Dijon&to=Besançon Viotte&date=2026
 .venv/bin/python -m unittest tests.test_api tests.test_trainline_cards   # OK
 ```
 
-## 25. Retrait de la case « Trains uniquement » — 12/08/2026
+## 26. Retrait de la case « Trains uniquement » — 12/08/2026
 
 Comme pour la case « Temps réel » (T8), la case à cocher du formulaire a été
 supprimée et le comportement devient le **défaut** :
@@ -911,7 +923,7 @@ supprimée et le comportement devient le **défaut** :
   vérifie que sans paramètre, tous les legs non-marche sont des trains.
 
 
-## 26. Correctif T3bis — départs masqués par le balayage RAPTOR « large » (13/08/2026)
+## 27. Correctif T3bis — départs masqués par le balayage RAPTOR « large » (13/08/2026)
 
 **Symptôme utilisateur** : recherche Saint-Vit → Paris-Bercy à 11:00 — le
 départ 12:17 n'apparaissait pas, la liste passait directement à 14:06.

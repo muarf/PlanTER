@@ -1,6 +1,6 @@
 {
   "appId": "fr.zvz.terfinder",
-  "appName": "TER Finder",
+  "appName": "planTER",
   "webDir": "web",
   "backgroundColor": "#1a3a8f",
   "ios": {

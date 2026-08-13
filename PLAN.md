@@ -687,6 +687,27 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ---
 
+### TÂCHE T12 — Calculs Tarifaires et Réductions (Moteur Interne)
+
+**Statut : En cours d'étude / À faire**
+
+**Objectif :** Estimer le prix du trajet (Plein Tarif) et calculer les tarifs réduits avec les cartes de réduction régionales/nationales de manière autonome (moteur interne).
+
+**Livrables :**
+- Script de compilation de la cartographie des gares par région (`scripts/build_station_regions.py` ➔ `config/station_regions.json`).
+- Module de calcul des prix `src/pricing.py` gérant la dégressivité totale (trajet mono-région) et la somme des segments (trajet pluri-région) ainsi que les réductions par carte.
+- Intégration dans `/v1/journeys` pour exposer `price_normal_eur` et `price_reduced_eur`.
+- Ré-intégration du sélecteur de cartes de réduction dans la SPA Web (`index.html` et `app.js`).
+
+**Critères d'acceptation :**
+- Paris-Besançon est estimé à 41,00 €.
+- Lille-Rouen via Amiens est estimé à 43,00 €.
+- Les cartes de réduction modifient correctement le prix selon les règles régionales.
+
+**Dépendances :** T5, T6, T8.
+
+---
+
 ## 15. Roadmap
 
 | Phase | Contenu | Critère de sortie |
@@ -698,6 +719,7 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 | **Phase 5 — Temps réel** | T8 | Retards et suppressions intégrés |
 | **Phase 6 — Monétisation** | T9 + T11 | Affiliation sans altérer la neutralité ; lien trajet total Trainline (cartes : logique prête, en attente d'un canal que Trainline honore) |
 | **Phase 7 — Surveillance** | T10 | Alerting Telegram en place et automatisé |
+| **Phase 8 — Estimation Tarifaire** | T12 | Calcul interne des tarifs et réductions opérationnel |
 
 ---
 
@@ -719,3 +741,20 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 - **StopArea / StopPoint** : gare / arrêt physique (nomenclature GTFS).
 - **Trip** : course (un train concret à une date/heure).
 - **Pareto-optimal** : solution dont aucun critère ne peut être amélioré sans dégrader un autre.
+
+## Annexe C — Analyse de la Tarification TER (Modélisation de prix)
+
+*Synthèse des trouvailles du 12/08/2026 sur le calcul réel des prix des billets TER.*
+
+L'intégration d'une estimation tarifaire fiable au sein de l'application doit tenir compte de la fragmentation territoriale de la tarification régionale SNCF. Deux cas de figure s'opposent :
+
+1. **Calcul unique dégressif (Trajets mono-régionaux)** :
+   - *Règle* : Si toutes les étapes (legs) ferroviaires d'un trajet relèvent de la même région organisatrice (ex: Bourgogne-Franche-Comté), le prix est calculé sur la **distance totale cumulée** en appliquant le barème kilométrique dégressif de la région.
+   - *Exemple canonique* : `Paris ➔ Dijon ➔ Besançon` (405 km). Bien que Paris soit en Île-de-France, le train est exploité par BFC. Le prix est calculé sur 405 km avec dégressivité nationale/régionale $\rightarrow$ **41,00 €** (au lieu de la somme des segments qui ferait 63,60 €).
+
+2. **Somme des segments (Trajets pluri-régionaux)** :
+   - *Règle* : En l'absence d'accord tarifaire entre deux régions organisatrices traversées, l'usager paie la somme des billets régionaux individuels de chaque segment.
+   - *Exemple canonique* : `Lille ➔ Amiens ➔ Rouen` (249 km). Lille-Amiens dépend des Hauts-de-France (22,10 €) et Amiens-Rouen dépend de la Normandie (20,30 €) $\rightarrow$ Le prix est la somme des deux billets $\rightarrow$ **43,00 €** (tarif Trainline constaté).
+
+### Recommandation d'implémentation :
+Pour estimer correctement les prix dans TER Finder, le moteur ne doit pas additionner systématiquement les segments, mais détecter l'autorité organisatrice de chaque segment (présente dans le GTFS) pour appliquer le barème dégressif sur la distance cumulée d'un seul bloc lorsque c'est possible.

@@ -426,7 +426,7 @@ class WebTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("text/html", r.headers["content-type"])
         html = r.text
-        self.assertIn("TER Finder", html)
+        self.assertIn("planTER", html)
         self.assertIn('id="search-form"', html)
         self.assertIn('id="from"', html)
         self.assertIn('id="to"', html)
@@ -451,7 +451,7 @@ class WebTestCase(unittest.TestCase):
     def test_aucun_tgv(self):
         # §8.2 : le mot TGV n'apparaît que pour le revendiquer, jamais comme trajet
         html = self.client.get("/").text
-        self.assertIn("Jamais de TGV", html)
+        self.assertIn("pas de TGV", html)
 
 
 if __name__ == "__main__":

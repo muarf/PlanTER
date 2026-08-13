@@ -1,4 +1,4 @@
-/* TER Finder — service worker (T7 v2.1) : cache offline partiel. */
+/* planTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
 const CACHE = "ter-finder-v3";

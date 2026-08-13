@@ -199,7 +199,7 @@ def _minutes(iso: str) -> int:
 
 # ---------------------------------------------------------------- application
 app = FastAPI(
-    title="TER Finder API",
+    title="planTER API",
     description="Recherche d'itinéraires 100% TER (moteur McRAPTOR).",
     version="0.1.0",
     lifespan=_lifespan,

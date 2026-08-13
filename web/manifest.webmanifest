@@ -1,6 +1,6 @@
 {
-  "name": "TER Finder — trajets 100% TER",
-  "short_name": "TER Finder",
+  "name": "planTER — planifiez vos voyages en TER",
+  "short_name": "planTER",
   "description": "Recherche d'itinéraires 100% TER en France — uniquement des trains régionaux, pas de TGV.",
   "lang": "fr",
   "start_url": "/",
