@@ -187,12 +187,19 @@ Le mode commercial doit être **préservé** dans le graphe (champ `vehicle_type
 - **Cas multi-gares (Paris)** : les 7 gares parisiennes (Est, Nord, Lyon, Bercy, Montparnasse, Saint-Lazare, Austerlitz) sont des StopAreas distinctes. Deux niveaux de gestion :
   - **v1 (simple)** : chaque gare est un point d'origine/destination distinct. L'utilisateur choisit « Paris Gare de Lyon », « Paris Bercy », etc. On ajoute un petit **graphe de marche/métro intra-Paris** dans un fichier de config (ex. Paris Est ↔ Paris Nord = 8 min à pied ; Paris Gare de Lyon ↔ Paris Bercy = 10 min ; Paris Est ↔ Paris Gare de Lyon = 20 min en métro ligne 5 ; etc.) pour permettre les correspondances inter-gares si elles sont utiles. Ces arcs de marche sont **optionnels** et désactivables.
   - **v2 (évolué)** : regrouper « Paris » comme un nœud unique multi-gares avec autocomplete intelligent (voir Tâche T6/T7).
-- **« Toutes gares » (§5.5) implémenté dès T2** : la recherche accepte « Paris » ou
-  « Paris toutes gares » comme un **groupe** de 7 gares (Est, Nord, Saint-Lazare,
-  Montparnasse Hall 1 - 2, Austerlitz, Gare de Lyon Hall 1 - 2, Bercy) — atteindre
-  l'une d'elles satisfait la recherche. Codé par `Graph.place_groups["paris"]` +
-  `Graph.resolve_place()` (graphe) et `_find_areas()` (vérificateur) ; l'arrivée à
-  n'importe quel membre compte, le routage inter-gares utilisant `paris_links`.
+- **« Toutes gares » implémenté dès T2 — à généraliser à TOUTES les villes à
+  plusieurs gares** : la recherche accepte « Paris » ou « Paris toutes gares »
+  comme un **groupe** de 7 gares (Est, Nord, Saint-Lazare, Montparnasse Hall 1 - 2,
+  Austerlitz, Gare de Lyon Hall 1 - 2, Bercy) — atteindre l'une d'elles satisfait la
+  recherche. Codé par `Graph.place_groups["paris"]` + `Graph.resolve_place()`
+  (graphe) et `_find_areas()` (vérificateur) ; l'arrivée à n'importe quel membre
+  compte, le routage inter-gares utilisant `paris_links`. **Tâche à faire** :
+  étendre le mécanisme à toute ville desservie par plusieurs gares TER (ex. Lyon
+  Part-Dieu/Perrache/Vaise, Marseille St-Charles/Blancarde/Picon-Busserine, Lille
+  Flandres/Europe), avec des groupes construits **dynamiquement** depuis
+  `config/station_regions.json` + alias (§5.4) plutôt que codés en dur pour Paris
+  uniquement. La recherche « Lyon toutes gares » doit proposer et considérer
+  l'ensemble des gares de Lyon.
 
 ### 5.4 Index de recherche des gares
 
@@ -221,7 +228,12 @@ Références :
 
 Obligatoires :
 1. **Heure d'arrivée la plus précoce** (pour une recherche « départ au plus tôt »).
-2. **Nombre de correspondances minimal** (0 à 3).
+2. **Nombre de correspondances minimal** (0 à 3) — **prioritaire** : le trajet au
+   plus faible nombre de correspondances doit être retourné et affiché **même s'il
+   est nettement plus long** (une correspondance longue est préférable à une
+   correspondance de plus). Ex. Paris→Marseille : une solution à 2 correspondances
+   avec ~4 h d'attente à Lyon doit être présentée **avant** une solution plus courte
+   en temps mais à 3+ correspondances.
 3. **Heure de départ la plus tardive** (pour une recherche « arrivée au plus tard »).
 
 Optionnels (v2) :
@@ -339,7 +351,9 @@ erreur 400, et **résoudre la circulation à la date demandée** (§4.5).
    - Filtre « Trains uniquement » (les correspondances sont proposées automatiquement, jusqu'à 6). **Depuis le 12/08/2026, ce filtre est le défaut** (plus de case dans le formulaire) ; `vehicle=all` reste utilisable via l'API pour inclure les cars TER.
    - Bouton rechercher.
 2. **Résultats** :
-   - Liste des trajets Pareto triés par heure de départ.
+   - Liste des trajets Pareto triés par heure de départ, avec **priorité aux
+     trajets à moins de correspondances** (2 correspondances > 3 correspondances,
+     même si plus long — cf. §6.2).
    - Pour chaque trajet : heure départ/arrivée, durée, nombre de correspondances, lignes.
    - Badge clair « Train TER » / « Car TER » par étape.
    - Aucun TGV/Intercités affiché, jamais.
