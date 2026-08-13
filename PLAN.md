@@ -15,21 +15,22 @@
 
 ## Table des matières
 
-1. [Contexte et objectif](#1-contexte-et-objectif)
-2. [Cas d'usage de référence](#2-cas-dusage-de-référence)
-3. [Sources de données](#3-sources-de-données)
-4. [Filtrage des TER (méthode validée)](#4-filtrage-des-ter-méthode-validée)
-5. [Modèle de données et graphe](#5-modèle-de-données-et-graphe)
-6. [Algorithme de calcul d'itinéraires](#6-algorithme-de-calcul-ditinéraires)
-7. [API REST](#7-api-rest)
-8. [Interface web](#8-interface-web)
-9. [Application mobile](#9-application-mobile)
-10. [Temps réel (v2)](#10-temps-réel-v2)
-11. [Monétisation](#11-monétisation)
-12. [Licence et obligations](#12-licence-et-obligations)
-13. [Risques et points d'attention](#13-risques-et-points-dattention)
-14. [Découpage en tâches pour les agents IA](#14-découpage-en-tâches-pour-les-agents-ia)
-15. [Roadmap](#15-roadmap)
+ 1. [Contexte et objectif](#1-contexte-et-objectif)
+ 2. [Cas d'usage de référence](#2-cas-dusage-de-référence)
+ 3. [Sources de données](#3-sources-de-données)
+ 4. [Filtrage des TER (méthode validée)](#4-filtrage-des-ter-méthode-validée)
+ 5. [Modèle de données et graphe](#5-modèle-de-données-et-graphe)
+ 6. [Algorithme de calcul d'itinéraires](#6-algorithme-de-calcul-ditinéraires)
+ 7. [API REST](#7-api-rest)
+ 8. [Interface web](#8-interface-web)
+ 9. [Application mobile](#9-application-mobile)
+ 10. [Temps réel (v2)](#10-temps-réel-v2)
+ 11. [Monétisation](#11-monétisation)
+ 12. [Licence et obligations](#12-licence-et-obligations)
+ 13. [Risques et points d'attention](#13-risques-et-points-dattention)
+ 14. [Découpage en tâches pour les agents IA](#14-découpage-en-tâches-pour-les-agents-ia)
+ 15. [Roadmap](#15-roadmap)
+ 16. [Problèmes identifiés et planification](#16-problèmes-identifiés-et-planification)
 
 ---
 
@@ -415,6 +416,8 @@ Pistes différées (à étudier après l'adoption) :
 | Horaires du lendemain / services de nuit | Normalisation > 24h (§5.2) + limite de fenêtre de recherche (§6.4) |
 | **Lignes « directes » au service irrégulier** (ex. le K7 Paris→Dijon ne circule pas tous les jours) | Résoudre **toujours** la circulation via `calendar_dates` à la date demandée ; jamais supposer une fréquence (§4.5) |
 | `route_short_name` partagé entre plusieurs lignes physiques (ex. « K7 ») | Identifier les lignes par `route_id` ; `short_name` = simple étiquette (§4.3) |
+| **Prix estimés inexacts ou trompeurs** | **À investiguer** : modèle de prix v1 calibré sur peu de données, annonces de prix non vendus en une fois, écarts avec prix réels (ex. Pierrelatte→Bollène 4,3€ vs 7,15€ affiché) |
+| **Annonces de perturbations tronquées** | **À corriger** : afficher les messages complets des perturbations sans coupure |
 
 ## 14. Découpage en tâches pour les agents IA
 
@@ -779,3 +782,65 @@ L'intégration d'une estimation tarifaire fiable au sein de l'application doit t
 
 ### Recommandation d'implémentation :
 Pour estimer correctement les prix dans planTER, le moteur ne doit pas additionner systématiquement les segments, mais détecter l'autorité organisatrice de chaque segment (présente dans le GTFS) pour appliquer le barème dégressif sur la distance cumulée d'un seul bloc lorsque c'est possible.
+
+---
+
+## 16. Problèmes identifiés et planification (à traiter en v2)
+
+### 16.1 Problèmes de prix estimés
+
+**Problèmes observés :**
+- **Prix affichés pour des billets non vendus en une seule fois** : l'affiche "Billet unique (si vendu en une fois) : ≈ 105,50 € → 22,50 €" est trompeur car ce trajet n'est pas vendu en une seule fois.
+- **Modèle de prix calibré sur peu de données** : le modèle v1 est calibré uniquement sur 3 prix observés Trainline (12/08/2026), ce qui est insuffisant pour couvrir tous les cas.
+- **Écarts importants avec les prix réels** : 
+  - Exemple : Pierrelatte → Bollène la Croisière (13.4 km) affiche 7,15€ alors que le prix réel est de 4,3€.
+  - Le modèle ne prend pas en compte les tarifs spécifiques régionaux ni les réductions locales.
+
+**Plan d'action (v2) :**
+1. **Validation des données sources** :
+   - Vérifier les sources de prix (Trainline vs SNCF vs données officielles)
+   - Identifier les cas où le prix est indiqué pour un billet non vendu en une fois
+   - Mettre en place une validation des prix avant affichage
+
+2. **Amélioration du modèle de prix** :
+   - Élargir la base de calibration avec plus de prix observés (50+ cas)
+   - Intégrer les données de prix officiels SNCF si disponibles
+   - Prendre en compte les spécificités tarifaires par région
+   - Ajouter une mention claire quand le prix est estimé vs réel
+
+3. **Affichage amélioré** :
+   - Distinction claire entre "prix estimé" et "prix réel"
+   - Indication si le billet est vendu en une seule fois ou nécessite plusieurs achats
+   - Source du prix affiché (Trainline, SNCF, etc.)
+
+### 16.2 Problèmes d'affichage des perturbations
+
+**Problème observé :**
+- Les annonces de perturbations (service alerts) sont tronquées et incomplètes dans l'affichage, ce qui réduit leur utilité pour les voyageurs.
+
+**Plan d'action (v2) :**
+1. **Correction de l'affichage** :
+   - Afficher les messages complets des perturbations sans coupure
+   - Améliorer la mise en forme pour une meilleure lisibilité
+   - Ajouter un lien vers plus d'informations si disponible
+
+2. **Filtrage intelligent** :
+   - Ne montrer que les perturbations affectant le trajet de l'utilisateur
+   - Prioriser les perturbations les plus impactantes
+   - Distinguer les perturbations mineures des perturbations majeures
+
+3. **Intégration avec le temps réel** :
+   - Synchroniser avec GTFS-RT pour les mises à jour en temps réel
+   - Notifications push pour les perturbations majeures (application mobile v2)
+
+### 16.3 Priorisation
+
+Ces problèmes seront traités dans la version 2 du projet, après la validation de la version 1. L'ordre de priorité recommandé est :
+1. Correction des prix affichés (problème le plus visible pour les utilisateurs)
+2. Amélioration de l'affichage des perturbations (impact sur l'expérience utilisateur)
+3. Refonte du modèle de prix (travail en profondeur nécessaire)
+
+### 16.4 Dépendances
+
+- Pour les prix : nécessite accès aux données tarifaires SNCF officielles
+- Pour les perturbations : dépend de l'intégration complète de GTFS-RT (T8)
