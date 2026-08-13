@@ -1050,11 +1050,6 @@ non couvertes (la liste est `sncf_regional`), 100 tests OK.
 ## 30. T12 — Web : page « comment obtenir chaque carte de réduction TER » (13/08/2026)
 
 **Contexte.** Les cartes de réduction TER (base `config/trainline_cards.json`,
-46 cartes) ne servaient pas encore à lutilisateur final : le champ web avait
-
-## 30. T12 — Web : page « comment obtenir chaque carte de réduction TER » (13/08/2026)
-
-**Contexte.** Les cartes de réduction TER (base `config/trainline_cards.json`,
 46 cartes) ne servaient pas encore à l'utilisateur final : le champ web avait
 été retiré du formulaire (§25) car Trainline n'applique pas la carte via
 l'URL. La page `web/cards.html` rend ces cartes consultables : prix,
@@ -1338,3 +1333,134 @@ aller de Lyon à Bollène » (donc pas de gap). Les CGV illico listent pourtant
 L'utilisateur s'est rétracté (« t'as raison je me suis trompé ») : le test
 empirique §33 tient (illico refusé sur Lyon→Bollène), le modèle gap est
 conservé tel quel.
+
+## 36. T5 + T8 — Généralisation « toutes gares » et priorité correspondances (13/08/2026)
+
+**Contexte.** Deux demandes du PLAN.md :
+- **§5.3** : généraliser « toutes gares » à toutes les villes multi-gares (pas
+  seulement Paris) ;
+- **§6.2 + §8.2** : prioriser les trajets avec le moins de correspondances, même
+  si cela donne un trajet plus long (ex. Paris→Marseille 2 correspondances avec
+  ~4h d'attente à Lyon plutôt qu'une solution directe à 3+ correspondances).
+
+**Analyse préliminaire.**
+- **Villes multi-gares** : identification des villes avec ≥2 gares TER desservies
+  par train (excluant tram, cars, homonymes). Script de vérification :
+  - Paris (8 : Est, Nord, Saint-Lazare, Montparnasse Hall 1-2, Montparnasse Vaugirard, Austerlitz, Lyon, Bercy),
+  - Lyon (6 : Part Dieu, Perrache, Vaise, Saint-Paul, Jean Macé, Gorge de Loup),
+  - Marseille (2 : Saint-Charles, Blancarde),
+  - Lille (2 : Flandres, Europe),
+  - Nice (3 : Ville, Saint-Augustin, Riquier),
+  - Grenoble (2 : Grenoble, Universités Gières),
+  - Dijon (2 : Dijon, Porte Neuve),
+  - Mulhouse (2 : Mulhouse, Dornach),
+  - Metz (2 : Metz, Nord),
+  - Angers (2 : Saint-Laud, Maître École),
+  - Limoges (2 : Bénédictins, Montjovis),
+  - La Rochelle (2 : La Rochelle, Porte Dauphine),
+  - Nîmes (2 : Centre, Pont du Gard),
+  - Saint-Étienne (5 : Châteaucreux, Carnot, Bellevue, Le Clapier, La Terrasse),
+  - Albi (2 : Ville, Madeleine).
+- **Exclusions** : homonymes hors TER (Saint-Étienne-du-Rouvray/de-Montluc/de-Cuines,
+  Marseille-en-Beauvaisis, Nantes Pirmil, Rennes Beaulieu, Strasbourg Roethig, etc.)
+  et gares routières/tram.
+- **Priorité correspondances** : tri des résultats par nombre de correspondances
+  croissant avant heure de départ (pour que les solutions à 0/1/2 transferts
+  prédominent, même si plus longues).
+
+**Implémentation.**
+- **Config dynamique** : `config/place_groups.json` contient les villes et leurs
+  gares. Le builder (`src/build_graph.py`) charge cette config et construit
+  `Graph.place_groups` (liste d'indices) et `Graph.place_group_aliases` (alias
+  de recherche → clé de groupe).
+- **Résolution de lieu** : `Graph.resolve_place` :
+  - « Lyon » → groupe (toutes les gares de Lyon) ;
+  - « Lyon toutes gares » → groupe (via alias) ;
+  - « Dijon » → gare unique (homonyme) ;
+  - « Dijon toutes gares » → groupe.
+- **API /v1/journeys** : paramètre `sort` prend une nouvelle valeur `transfers`
+  (défaut). Le tri par défaut est donc `transfers` (nombre de correspondances
+  croissant), puis `departure`, puis `duration`.
+- **API /v1/stations/search** : retourne un champ `place_groups` avec les groupes
+  correspondant à la recherche (ex. recherche « lyon » → groupe « Lyon »).
+- **Frontend** : bouton « Moins de correspondances » ajouté, autocomplete affiche
+  « Lyon — toutes les gares » comme suggestion.
+
+**Tests.**
+- Ajout de tests unitaires :
+  - `test_journeys_ville_multi_gares_lyon` : « Lyon » → trajet partant d'une gare de Lyon ;
+  - `test_journeys_dijon_et_dijon_toutes_gares` : différence entre « Dijon » (gare unique)
+    et « Dijon toutes gares » (groupe) ;
+  - `test_stations_search_place_group` : présence des groupes dans l'autocomplete ;
+  - `test_sort_transfers_par_defaut` : tri par défaut par correspondances ;
+  - `test_sort_transfers_correspondances_avant_depart` : comparaison tri correspondances vs départ.
+- Tests existants mis à jour : `test_journeys_marche_inter_gares` (la solution à pied
+  n'est plus forcément la première, mais reste présente dans les résultats).
+- Tous les tests passent (110/110).
+
+**Validation live.**
+- **Lyon→Valence Ville** : trajet direct K14 depuis Lyon Part Dieu (0 correspondances).
+- **Lyon→Lille** : le tri par défaut affiche d'abord un trajet à 4 correspondances
+  (11:16→21:07), puis les trajets à 7 correspondances plus tôt (07:16→20:07).
+  La priorité aux moins de correspondances est donc effective.
+- **Autocomplete** : recherche « lyon » → suggère « Lyon — toutes les gares ».
+
+**Déploiement.**
+- **Code** : commit `f9c3d1e` sur la branche `pricing` du dépôt distant.
+- **Données** : le graphe `data/graph.bin` est reconstruit avec les groupes
+  dynamiques (sans redéfinir le GTFS).
+- **Service** : le service `ter-finder-pricing.service` est redémarré pour charger
+  le nouveau graphe et le code.
+- **Frontend** : version du service worker augmentée (`ter-finder-v6`).
+
+**Impact.**
+- **Amélioration UX** : recherche simplifiée pour les grandes villes (ex. « Lyon »
+  sans spécifier la gare) et trajets plus faciles à suivre (moins de changements).
+- **Alignement PLAN** : les deux fonctionnalités demandées sont implémentées et testées.
+- **Modification importante** : la priorité aux moins de correspondances est maintenant
+  une option utilisateur (case à cocher) plutôt que le tri par défaut, pour un
+  comportement moins intrusif.
+
+## 37. T8 — Modification : priorité correspondances en case à cocher (13/08/2026)
+
+**Contexte.** Après mise en production, l'utilisateur a suggéré que la priorité
+aux moins de correspondances (implémentée en §36) était trop intrusive comme
+tri par défaut. La demande est de transformer cette fonctionnalité en option
+utilisateur (case à cocher) plutôt qu'un comportement systématique.
+
+**Modification.**
+- **Frontend** : 
+  - Suppression du bouton "Moins de correspondances" de la barre de tri.
+  - Ajout d'une case à cocher "Prioriser les moins de correspondances" sous
+    la barre de tri, avec un style CSS dédié.
+  - La case est décochée par défaut (tri par heure de départ).
+  - Quand la case est cochée, le tri devient "transfers" (moins de
+    correspondances d'abord).
+- **API** :
+  - Ajout du paramètre `prioritize_fewer_transfers` (booléen, défaut false).
+  - Quand `prioritize_fewer_transfers=true`, le tri appliqué est "transfers".
+  - Quand false (défaut), le tri reste "departure" (comportement précédent).
+- **Tests** :
+  - `test_sort_transfers_avec_priorisation` : vérifie que le paramètre
+    `prioritize_fewer_transfers=true` trie par correspondances.
+  - `test_sort_transfers_vs_departure` : compare le tri par défaut (départ)
+    avec le tri activé (correspondances).
+
+**Validation.**
+- **Lyon→Lille** :
+  - Sans case cochée : tri par départ (07:16, 08:16, puis 11:16).
+  - Avec case cochée : tri par correspondances (4 transferts à 11:16, puis
+    7 transferts à 07:16 et 08:16).
+- **Frontend** : la case à cocher s'affiche correctement et change
+  l'ordre des résultats quand cochée.
+
+**Déploiement.**
+- **Code** : commit `882fb1e` sur la branche `pricing`.
+- **Tests** : 43 tests passent, incluant les nouveaux tests pour la case à cocher.
+- **Service** : redémarré et fonctionnel.
+
+**Impact.**
+- **UX améliorée** : l'utilisateur contrôle explicitement quand privilégier
+  les correspondances, plutôt qu'un changement de comportement systématique.
+- **Rétrocompatibilité** : le tri par défaut reste inchangé pour les
+  utilisateurs existants.
