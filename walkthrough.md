@@ -1464,3 +1464,20 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
   les correspondances, plutôt qu'un changement de comportement systématique.
 - **Rétrocompatibilité** : le tri par défaut reste inchangé pour les
   utilisateurs existants.
+
+## 38. T9 — Désactivation des logs serveur et respect de la vie privée (13/08/2026)
+
+**Contexte.** Dans le but de respecter pleinement la vie privée des utilisateurs et de pouvoir s'engager à ne stocker aucune donnée personnelle sur betater.zvz.fr, le serveur a été configuré pour supprimer toute conservation de logs d'accès.
+
+**Modifications.**
+- **Nginx** :
+  - Modification de `/etc/nginx/sites-enabled/betater.zvz.fr` pour remplacer `access_log ...` par `access_log off;`. Les logs d'accès ne sont plus écrits sur le disque.
+- **API (Uvicorn / FastAPI)** :
+  - Modification de `/etc/systemd/system/ter-finder-pricing.service` pour ajouter l'option `--no-access-log` à Uvicorn. Les requêtes HTTP ne sont plus enregistrées dans le journal système.
+- **Politique de confidentialité** :
+  - Mise à jour de [privacy.html](file:///home/ubuntu/ter-finder-pricing/web/privacy.html) (section *Côté serveur*) pour refléter cette absence totale de logs de connexion et expliquer le rôle éphémère du routage d'Oracle Cloud / FAI.
+
+**Validation.**
+- Rechargement de systemd, redémarrage de `ter-finder-pricing.service` et rechargement de Nginx.
+- Un test HTTP (curl) confirme qu'aucune requête n'est plus loguée par Nginx dans `betater_zvz_fr_access.log`, ni par Uvicorn dans journalctl.
+
