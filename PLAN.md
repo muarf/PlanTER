@@ -238,6 +238,7 @@ Optionnels (v2) :
 
 - **Trajets de nuit** : les trips passant minuit doivent être chaînables (un train partant à 23:50 arrivant à 00:20). Limite de recherche : ne pas chercher au-delà de ~24–36 h depuis l'heure de départ pour éviter la boucle infinie.
 - **Correspondance minimum** : respecter le temps de correspondance de la gare (§5.3). Un changement n'est valable que si `arrivée_leg1 + min_correspondance ≤ départ_leg2`.
+- **Recherche « large » (DepartAfter) — révélation des départs** : RAPTOR simple ne garde que l'arrivée la plus précoce par round. Un départ qui « rattrape » la même correspondance (même second leg, donc même arrivée, mais départ plus tardif — ex. Saint-Vit 12:17 rejoignant le même K7 que le 11:06) est dominé et perdu. Le balayage large (tranches horaires puis relance du balayage au départ+1 de chaque trajet découvert) révèle ces départs et énumère tous les départs utiles de l'horizon (borne de sécurité `MAX_REVEAL_PASSES`, src/raptor.py). Désactivée pour ArriveBy : elle n'apporterait que des départs plus tôt sans valeur pour un « arrivée au plus tard ».
 - **Récupération du chemin** : mémoriser, pour chaque arrêt, le trip emprunté et l'arrêt précédent, pour reconstruire les étapes du voyage (backpointer).
 - **Contrainte forte (non négociable)** : **tous les legs d'un itinéraire doivent être des trips TER** (whitelist §4.2). Le moteur doit être construit sur le graphe filtré : il est *structurellement* impossible de sortir un TGV/Intercités.
 

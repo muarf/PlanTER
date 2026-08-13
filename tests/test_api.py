@@ -155,6 +155,20 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(j["transfers"], 2)
         self.assertEqual(j["arrival"], "2026-08-11T00:31:00+02:00")
 
+    def test_journeys_depart_12h17_revele(self):
+        """T3bis — Saint-Vit -> Paris Bercy à 11:00 : le départ 12:17 (qui
+        rattrape le même K7 que le 11:06, même arrivée 17:06) doit apparaître
+        dans les résultats (le moteur ne le domine plus)."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Saint-Vit", "to": "Paris Bercy", "date": DATE, "time": "11:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        js = r.json()["journeys"]
+        dep12 = [j for j in js if j["departure"][11:16] == "12:17"]
+        self.assertEqual(len(dep12), 1)
+        self.assertEqual(dep12[0]["arrival"], "2026-08-10T17:06:00+02:00")
+
     def test_journeys_count_et_max_transfers(self):
         r = self.client.get(
             "/v1/journeys",

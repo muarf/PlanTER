@@ -41,6 +41,12 @@ _DST_END = (10, 25)
 # côté origine + un côté destination (ex. Paris GDL -> Bercy puis retour).
 MAX_WALK_LEGS = 2
 
+# Borne de sécurité sur les passes de « révélation » du balayage large (§6.4) :
+# chaque pass coûte un balayage RAPTOR. La chaîne de révélation se termine
+# naturellement quand plus aucun nouveau trajet n'apparaît ; la borne ne sert
+# qu'à se prémunir contre un graphe pathologique (ligne très dense).
+MAX_REVEAL_PASSES = 40
+
 
 def _is_dst(d: _date) -> bool:
     return (_DST_START[0], _DST_START[1]) <= (d.month, d.day) < (_DST_END[0], _DST_END[1])
@@ -314,24 +320,66 @@ class RaptorEngine:
         realtime: Optional[object] = None,
         slice_min: int = 180,
     ) -> list[Journey]:
-        """RAPTOR « large » : RAPTOR classique ne garde que l'arrivée la plus
-        tôt par nombre de correspondances — un trajet rapide qui part tard est
-        éliminé comme dominé (départ+arrivée plus tardifs qu'un autre). En
-        relançant le balayage par tranches horaires depuis t0 (ici toutes les
-        `slice_min` min, horizon 36 h), on récupère les meilleurs trajets de
-        chaque tranche (y compris les rapides de fin de journée), dédupliqués.
-        Coût ~2-3× une passe simple ; résultats triés par (départ, arrivée)."""
+        """RAPTOR « large » (départ au plus tôt) : renvoie l'ensemble des
+        départs utiles depuis t0 (horizon 36 h), triés par (départ, arrivée).
+
+        RAPTOR classique ne garde que l'arrivée la plus précoce par round : un
+        train qui « rattrape » la même correspondance (même second leg, donc
+        même arrivée, mais départ plus tardif — ex. Saint-Vit 12:17 qui rejoint
+        le même K7 que le 11:06) est dominé et perdu. Le balayage par tranches
+        (`slice_min`) puis la révélation en relançant le balayage au départ+1
+        de chaque trajet découvert rendent ces départs (voir `_sweep_wide`)."""
         views = self._views(date, vehicle, mirror=False, realtime=realtime)
         rt = realtime.snapshot() if realtime is not None else None
+        return self._sweep_wide(
+            views, origins, dests, t0, t0 + HORIZON_MIN, max_transfers,
+            date, mirror=False, rt=rt, slice_min=slice_min,
+            horizon=lambda start: start + HORIZON_MIN,
+        )
+
+    def _sweep_wide(
+        self,
+        views: dict[int, list[tuple[int, list]]],
+        origins: list[int],
+        dests: list[int],
+        start0: int,
+        stop0: int,
+        max_transfers: int,
+        date: int,
+        mirror: bool,
+        rt: Optional[object],
+        slice_min: int,
+        horizon,
+        reveal: bool = True,
+    ) -> list[Journey]:
+        """Cœur du balayage « large » (§6.4) : tranches fixes toutes les
+        `slice_min` minutes, puis révélation des départs suivants.
+
+        La révélation (`reveal=True`) : relancer le balayage à « départ du
+        trajet trouvé + 1 » révèle le trajet suivant — celui qui part après,
+        avec l'arrivée la plus précoce possible. La chaîne de révélation
+        (chaque nouveau trajet en déclenche une) énumère tous les départs
+        utiles de l'horizon, y compris ceux qui rattrapent la même
+        correspondance qu'un départ précédent (ex. Saint-Vit 12:17 qui
+        rejoint le même K7 que le 11:06).
+
+        RAPTOR classique ne garde que l'arrivée la plus précoce par round :
+        ces départs-là sont dominés et perdus sans cette révélation. Elle est
+        pertinente pour DepartAfter (« tous les départs ») ; pour ArriveBy on
+        la désactive (`reveal=False`) car elle ferait apparaître des départs
+        plus tôt/arrivées plus tôt que la meilleure option « départ le plus
+        tardif », sans valeur ajoutée pour l'utilisateur.
+        """
         seen: set[tuple] = set()
         out: list[Journey] = []
-        for start in range(t0, t0 + HORIZON_MIN + 1, slice_min):
+
+        def run(start: int) -> None:
             arr_by_round, round_parents, transfer_walk = self._rounds(
-                views, origins, dests, start, max_transfers, start + HORIZON_MIN
+                views, origins, dests, start, max_transfers, horizon(start)
             )
             for j in self._pareto_journeys(
                 arr_by_round, round_parents, transfer_walk, origins, dests, start,
-                date=date, mirror=False, realtime=rt,
+                date=date, mirror=mirror, realtime=rt,
             ):
                 key = (j.departure, j.arrival, j.transfers,
                        tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
@@ -339,6 +387,20 @@ class RaptorEngine:
                     continue
                 seen.add(key)
                 out.append(j)
+
+        for start in range(start0, stop0 + 1, slice_min):
+            run(start)
+
+        # révélation : chaque trajet découvert déclenche un balayage au
+        # départ suivant (borne de sécurité `MAX_REVEAL_PASSES`).
+        reveal_passes = 0
+        i = 0
+        while reveal and i < len(out) and reveal_passes < MAX_REVEAL_PASSES:
+            reveal_passes += 1
+            j = out[i]
+            i += 1
+            run(MAXT - j.arrival + 1 if mirror else j.departure + 1)
+
         return sorted(out, key=lambda j: (j.departure, j.arrival))
 
     # ------------------------------------------------------------- ArriveBy
@@ -380,31 +442,20 @@ class RaptorEngine:
         realtime: Optional[object] = None,
         slice_min: int = 180,
     ) -> list[Journey]:
-        """ArriveBy « large » : tranches horaires du temps renversé, équivalent
-        miroir de `depart_after_wide` (récupère les trajets rapides arrivant
-        avant la limite, mêmes si leur départ est tôt)."""
+        """ArriveBy « large » : équivalent miroir de `depart_after_wide`
+        (récupère les trajets rapides arrivant avant la limite, mêmes si leur
+        départ est tôt). Tranches du temps renversé, sans révélation — voir
+        `_sweep_wide` pour la justification."""
         t0 = MAXT - deadline
         views = self._views(date, vehicle, mirror=True, realtime=realtime)
         rt = realtime.snapshot() if realtime is not None else None
-        seen: set[tuple] = set()
-        out: list[Journey] = []
         # temps renversé : on scanne du plus tard (départ miroir le plus tôt)
         # vers le plus tôt, en tranches.
-        for start in range(t0, MAXT + 1, slice_min):
-            arr_by_round, round_parents, transfer_walk = self._rounds(
-                views, dests, origins, start, max_transfers, MAXT
-            )
-            for j in self._pareto_journeys(
-                arr_by_round, round_parents, transfer_walk, dests, origins, start,
-                date=date, mirror=True, realtime=rt,
-            ):
-                key = (j.departure, j.arrival, j.transfers,
-                       tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
-                if key in seen:
-                    continue
-                seen.add(key)
-                out.append(j)
-        return sorted(out, key=lambda j: (j.departure, j.arrival))
+        return self._sweep_wide(
+            views, dests, origins, t0, MAXT, max_transfers,
+            date, mirror=True, rt=rt, slice_min=slice_min,
+            horizon=lambda start: MAXT, reveal=False,
+        )
 
     # ------------------------------------------------------------- Pareto
     def _pareto_journeys(

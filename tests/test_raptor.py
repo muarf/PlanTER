@@ -113,6 +113,39 @@ class RaptorTestCase(unittest.TestCase):
         self.assertIn("walk", [leg.type for leg in j.legs])
         self.assertEqual(j.legs[-1].to_name, "Mulhouse")
 
+    def test_wide_revele_le_depart_qui_rattrape_la_meme_correspondance(self):
+        """Recherche large (T3bis) : à 11:00, le 12:17 Saint-Vit rejoint le
+        même K7 (N17758) que le 11:06 → même arrivée 17:06. RAPTOR simple le
+        jette comme dominé ; la révélation le fait apparaître."""
+        js = self.e.depart_after_wide(DATE, self.resolve("Saint-Vit"), self.resolve("Paris Bercy"), _m(11, 0), 6, "train_only")
+        dep12 = [j for j in js if j.departure == _m(12, 17)]
+        self.assertEqual(len(dep12), 1)
+        j = dep12[0]
+        self.assertEqual(j.arrival, _m(17, 6))
+        self.assertEqual(j.transfers, 1)
+        # même second leg (le K7 N17758) que le 11:06 (qui reste en tête de liste)
+        self.assertEqual(js[0].departure, _m(11, 6))
+        self.assertEqual(js[0].legs[1].trip_id, j.legs[1].trip_id)
+        self.assertEqual(js[0].arrival, j.arrival)
+
+    def test_wide_renvoie_les_departs_intermediaires(self):
+        """Recherche large (T3bis) : Dijon -> Besançon Viotte renvoie tous les
+        directs horaires (et pas seulement le 1er de chaque tranche de 3 h)."""
+        js = self.e.depart_after_wide(DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"), _m(7, 0), 6, "train_only")
+        deps = sorted({j.departure for j in js})
+        self.assertIn(_m(8, 8), deps)  # entre 07:09 (tranche 07:00) et 10:12 (tranche 10:00)
+        self.assertIn(_m(9, 9), deps)
+        self.assertIn(_m(10, 12), deps)
+
+    def test_wide_arrive_by_reste_sans_revelation(self):
+        """Recherche large ArriveBy (T3bis) : la révélation est désactivée —
+        le meilleur « départ le plus tardif » reste en tête, sans départs plus
+        tôt qui n'apporteraient rien."""
+        js = self.e.arrive_by_wide(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 6, "train_only")
+        self.assertTrue(js)
+        self.assertEqual(js[0].arrival, _m(12, 4))
+        self.assertEqual(js[0].departure, _m(7, 34))
+
     # -------------------------------------------------------------- modes
     def test_nuit_depart_apres_0300(self):
         j = self.e.depart_after(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(3, 0), 3)

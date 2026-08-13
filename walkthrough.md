@@ -911,3 +911,32 @@ supprimée et le comportement devient le **défaut** :
   vérifie que sans paramètre, tous les legs non-marche sont des trains.
 
 
+## 26. Correctif T3bis — départs masqués par le balayage RAPTOR « large » (13/08/2026)
+
+**Symptôme utilisateur** : recherche Saint-Vit → Paris-Bercy à 11:00 — le
+départ 12:17 n'apparaissait pas, la liste passait directement à 14:06.
+
+**Cause** : RAPTOR simple ne garde que l'arrivée la plus précoce par round.
+Le 12:17 Saint-Vit (→ Dijon 13:02) rejoint exactement le **même K7 N17758**
+(13:32) que le 11:06 → même arrivée 17:06 → dominé et jeté. Le balayage large
+par tranches de 3 h (`slice_min=180`) ne sauvait rien : les deux départs
+tombent dans la même tranche 11:00.
+
+**Correctif** (`src/raptor.py`) :
+- nouveau cœur commun `_sweep_wide` (tranches fixes + **révélation**) utilisé
+  par `depart_after_wide` ;
+- la révélation relance le balayage au « départ du trajet trouvé + 1 » pour
+  chaque trajet découvert : la chaîne énumère tous les départs utiles de
+  l'horizon (bornée par `MAX_REVEAL_PASSES=40`), y compris ceux qui
+  rattrapent la même correspondance qu'un départ précédent ;
+- effet de bord positif : Dijon → Besançon Viotte affiche désormais tous les
+  directs horaires (07:09, 07:40, 08:08, 09:09, 10:12…) au lieu d'un seul par
+  tranche de 3 h ;
+- la révélation est **désactivée pour ArriveBy** (`reveal=False`) : elle ne
+  ferait apparaître que des départs plus tôt / arrivées plus tôt que la
+  meilleure option « départ le plus tardif », sans valeur ajoutée ;
+- tests : 4 nouveaux (`tests/test_raptor.py` ×3, `tests/test_api.py` ×1) ;
+  suite complète **78 tests OK**.
+
+
+
