@@ -169,6 +169,24 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(len(dep12), 1)
         self.assertEqual(dep12[0]["arrival"], "2026-08-10T17:06:00+02:00")
 
+    def test_journeys_prix_estime(self):
+        """T12 — chaque trajet expose un prix estimé et ses métadonnées de
+        tarification (règle, km, régions) sur /v1/journeys."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        js = r.json()["journeys"]
+        self.assertTrue(js)
+        for j in js[:2]:
+            self.assertIsInstance(j["price_normal_eur"], float)
+            self.assertGreater(j["price_normal_eur"], 0)
+            self.assertIn("pricing", j)
+            self.assertIn("rule", j["pricing"])
+            self.assertIn("km", j["pricing"])
+            self.assertTrue(j["pricing"]["legs"])
+
     def test_journeys_count_et_max_transfers(self):
         r = self.client.get(
             "/v1/journeys",

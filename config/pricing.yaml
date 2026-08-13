@@ -1,0 +1,40 @@
+# T12 — Modèle de tarification TER (ESTIMATION v1).
+#
+# Formule : prix = scale_region × (a·√km + b·km), arrondi aux `round_to`
+# centimes, plancher `min_eur`.
+#
+#   km = distance ferroviaire ESTIMÉE = somme des haversine entre arrêts
+#        consécutifs d'un leg × rail_factor (approximation de la longueur de
+#        voie, toujours > distance à vol d'oiseau).
+#
+# La courbe (a, b) est calibrée sur des prix TER observés (Trainline,
+# 12/08/2026) :
+#   - Bourgogne-Franche-Comté : 405 km de voie -> 41,00 €
+#     (Paris -> Dijon -> Besançon, billet unique dégressif)
+#   - Hauts-de-France : 112 km -> 22,10 € (Lille -> Amiens)
+#   - Normandie : 112 km -> 20,30 € (Amiens -> Rouen)
+#
+# Règle d'agrégation (§ Annexe C) :
+#   - trajet MONO-RÉGION  : un seul billet sur la distance totale cumulée
+#     (dégressivité globale) ;
+#   - trajet PLURI-RÉGION : un billet par tronçon, sommé (pas d'accord
+#     tarifaire inter-régions).
+#
+# `scale` par région ajuste la courbe de référence pour coller aux prix
+# observés ; sans entrée, `default_scale` s'applique. Ces valeurs sont des
+# ESTIMATIONS provisoires, à affiner avec davantage d'observations.
+
+rail_factor: 1.17        # haversine -> longueur de voie approchée
+min_eur: 3.00            # prix plancher d'un billet
+round_to: 0.05           # arrondi aux 5 centimes
+a: 1.934                 # terme √km
+b: 0.00652               # terme km
+default_scale: 1.0
+
+regions:
+  Bourgogne-Franche-Comté:
+    scale: 0.9865        # 405 km -> 41,00 € (cible T12)
+  Hauts-de-France:
+    scale: 1.0425        # 112 km -> 22,10 €
+  Normandie:
+    scale: 0.9575        # 112 km -> 20,30 €

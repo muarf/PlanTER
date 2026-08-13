@@ -162,6 +162,7 @@ function renderJourneys(journeys) {
       <div class="journey-meta">
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
         · ${j.transfers} correspondance(s) · ${lines}${badges}
+        ${priceChip(j)}
       </div>
       ${riskNote(j)}
       ${alertsNote(j)}
@@ -171,6 +172,34 @@ function renderJourneys(journeys) {
     li.appendChild(btn);
     journeysList.appendChild(li);
   });
+}
+
+/* T12 — prix estimé (modèle v1) : affiché comme une estimation, jamais comme
+   un tarif officiel. */
+function fmtPrice(eur) {
+  return eur.toFixed(2).replace(".", ",") + " €";
+}
+
+function priceChip(j) {
+  if (j.price_normal_eur == null) return "";
+  const title = (j.pricing && j.pricing.note) || "prix estimé";
+  return ` <span class="price-chip" title="${title}">≈ ${fmtPrice(j.price_normal_eur)}</span>`;
+}
+
+function priceBlock(j) {
+  if (j.price_normal_eur == null || !j.pricing) return "";
+  const rows = j.pricing.legs
+    .map((l) => `<div class="price-leg"><span class="price-leg-line">${l.line}</span>
+      <span>${l.km} km</span><span class="price-leg-region">${l.region}</span></div>`)
+    .join("");
+  const rule = j.pricing.rule === "mono_region"
+    ? "un seul billet dégressif sur la distance totale"
+    : "un billet par tronçon, sommé";
+  return `<div class="price-note">
+    <strong>Prix estimé : ≈ ${fmtPrice(j.price_normal_eur)}</strong>
+    <div class="price-detail">${rows}<div class="price-rule">Règle : ${rule}.</div>
+    <small>${j.pricing.note}.</small></div>
+  </div>`;
 }
 
 /* T11 — lien Trainline « Réserver le trajet » (total) + billets par leg.
@@ -194,11 +223,13 @@ function showDetail(j, withAlternative) {
   detailBody.innerHTML = `<div class="journey-head">
       <span class="journey-times">${fmtTime(j.departure)} → ${fmtTime(j.arrival)}</span>
       ${nextDay(j.arrival) ? '<span class="badge badge-next-day">+1j</span>' : ""}
+      ${priceChip(j)}
     </div>
     <p class="journey-meta">Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
       · ${j.transfers} correspondance(s)</p>
     ${riskNote(j)}
     ${alertsNote(j)}
+    ${priceBlock(j)}
     ${alt}
     <ol class="timeline"></ol>`;
   const timeline = detailBody.querySelector(".timeline");

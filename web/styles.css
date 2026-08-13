@@ -107,6 +107,25 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 .badge-next-day { background: #fde8e6; color: #8c2d26; }
 .badge-delay { background: #fff3cd; color: #8a6100; }
 .rt-delay { color: #b45309; }
+.price-chip {
+  display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 700; margin-left: 0.25rem; vertical-align: middle;
+  background: #eef3ff; color: #27408c; cursor: help;
+}
+.price-note {
+  margin-top: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 6px;
+  background: #f0f4ff; border: 1px solid #b9c6e6; color: #27408c;
+  font-size: 0.85rem; line-height: 1.4;
+}
+.price-detail { margin-top: 0.4rem; border-top: 1px dashed #b9c6e6; padding-top: 0.4rem; }
+.price-leg {
+  display: flex; gap: 0.75rem; font-size: 0.8rem; color: #35436b;
+}
+.price-leg + .price-leg { margin-top: 0.2rem; }
+.price-leg-line { font-weight: 700; min-width: 2.5rem; }
+.price-leg-region { margin-left: auto; }
+.price-rule { margin-top: 0.35rem; font-size: 0.8rem; }
+.price-note small { display: block; margin-top: 0.3rem; color: #5a6aa0; }
 .connection-risk {
   margin-top: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 6px;
   background: #fff7e6; border: 1px solid #e0c080; color: #7a5200;

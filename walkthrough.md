@@ -952,3 +952,42 @@ tombent dans la même tranche 11:00.
 
 
 
+## 28. MVP Tarification (T12) — prix estimés, branche pricing (13/08/2026)
+
+**Contexte.** Analyse de la tarification TER (§24) : les régions organisatrices
+appliquent un barème dégressif sur la distance totale pour les trajets
+mono-région (un billet unique), et la somme des billets par tronçon sinon
+(pluri-région, sans accord tarifaire inter-régions).
+
+**MVP livré sur la branche `pricing`** (déployée sur https://betater.zvz.fr) :
+
+- `scripts/build_station_regions.py` : télécharge SNCF Open Data
+  « liste-des-gares » (code UIC → libellé/département), convertit le
+  département en région administrative (mapping INSEE) et écrit
+  `config/station_regions.json`. Couverture du graphe : 2545/3462 gares (73,5 %,
+  inconnues = gares frontalières principalement).
+- `src/pricing.py` (`PricingEngine`) :
+  - distance d'un leg = somme des haversine entre arrêts × 1,17
+    (≈ longueur de voie) ;
+  - région d'un train = région majoritaire de ses arrêts ;
+  - tarif = `scale_région × (a·√km + b·km)`, arrondi aux 5 centimes, plancher
+    3 € (config `config/pricing.yaml`) ;
+  - règle mono/pluri-région appliquée par trajet.
+- `src/api.py` : `/v1/journeys` expose `price_normal_eur` + `pricing`
+  (rule, km, régions, legs) — toujours marqué comme **estimation**.
+- Web : `priceChip` ≈ prix dans les résultats et le détail (bloc
+  `priceBlock` : km/région par leg + règle appliquée).
+
+**Calibration (prix observés Trainline le 12/08/2026)** : BFC 405 km →
+41,00 € (scale 0,9865) ; HDF 112 km → 22,10 € (scale 1,0425) ; Normandie
+112 km → 20,30 € (scale 0,9575).
+
+**Résultats de référence sur le graphe réel :**
+- Dijon → Besançon Viotte (07:09) : 102,9 km mono-région BFC → **20,00 €**
+  (réel ≈ 12 € — limite connue du modèle sur les trajets courts) ;
+- Saint-Vit → Paris Bercy : C11+K7, 399 km mono-région BFC → **41,25 €**.
+
+**Limites à affiner avant d'aller plus loin :** très peu d'observations pour
+calibrer (3 prix), distance approximative, prix courts surévalués, cartes de
+réduction non appliquées (`price_reduced_eur` à venir), gares frontalières
+sans région.

@@ -27,6 +27,7 @@ from starlette.types import Scope, Receive, Send
 from src.graph import Graph, ALIASES
 from src.raptor import RaptorEngine
 from src import gtfs_rt, trainline, trainline_cards
+from src.pricing import PricingEngine
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -37,13 +38,15 @@ _COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 _engine: RaptorEngine | None = None
 _poller: gtfs_rt.RealtimePoller | None = None
+_pricing: PricingEngine | None = None
 
 
 def get_engine(graph_path: Path = DEFAULT_GRAPH) -> RaptorEngine:
     """Charge le graphe une seule fois (module-level), puis le partage."""
-    global _engine, _poller
+    global _engine, _poller, _pricing
     if _engine is None:
         _engine = RaptorEngine(Graph.load(graph_path))
+        _pricing = PricingEngine(_engine.graph)
         # T8 — temps réel GTFS-RT en arrière-plan ; l'échec de démarrage ne
         # bloque pas l'API (le poller retentera au prochain intervalle).
         try:
@@ -351,6 +354,12 @@ def journeys(
     card_ids = trainline_cards.valid_ids([c for c in cards.split(",") if c])
     for j in journeys:
         jd = _bare_journey(j.to_json(d))
+        # T12 — prix estimés (modèle v1, calibré sur prix observés) : le prix
+        # n'est jamais nul et reste une ESTIMATION clairement signalée.
+        price_info = _pricing.journey_price(j) if _pricing is not None else None
+        if price_info is not None:
+            jd["price_normal_eur"] = price_info.pop("price_normal_eur")
+            jd["pricing"] = price_info
         bookable = 0
         # T11 — leg ferroviaire de départ et d'arrivée (marches exclues), pour
         # le lien « trajet total » (une seule réservation de bout en bout).

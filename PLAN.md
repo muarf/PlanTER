@@ -689,20 +689,26 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 
 ### TÂCHE T12 — Calculs Tarifaires et Réductions (Moteur Interne)
 
-**Statut : En cours d'étude / À faire**
+**Statut : MVP expérimental livré sur la branche `pricing` → https://betater.zvz.fr (13/08/2026) — prix ESTIMÉS à valider**
 
 **Objectif :** Estimer le prix du trajet (Plein Tarif) et calculer les tarifs réduits avec les cartes de réduction régionales/nationales de manière autonome (moteur interne).
 
 **Livrables :**
-- Script de compilation de la cartographie des gares par région (`scripts/build_station_regions.py` ➔ `config/station_regions.json`).
+- Script de compilation de la cartographie des gares par région (`scripts/build_station_regions.py` ➔ `config/station_regions.json`, SNCF liste-des-gares).
 - Module de calcul des prix `src/pricing.py` gérant la dégressivité totale (trajet mono-région) et la somme des segments (trajet pluri-région) ainsi que les réductions par carte.
 - Intégration dans `/v1/journeys` pour exposer `price_normal_eur` et `price_reduced_eur`.
 - Ré-intégration du sélecteur de cartes de réduction dans la SPA Web (`index.html` et `app.js`).
 
 **Critères d'acceptation :**
-- Paris-Besançon est estimé à 41,00 €.
-- Lille-Rouen via Amiens est estimé à 43,00 €.
-- Les cartes de réduction modifient correctement le prix selon les règles régionales.
+- Paris-Besançon est estimé à 41,00 €. ✅ (calibré : 41,00 € à 405 km en BFC)
+- Lille-Rouen via Amiens est estimé à 43,00 €. ⚠️ (≈ 42-50 € selon les tronçons trouvés)
+- Les cartes de réduction modifient correctement le prix selon les règles régionales. ❌ (pas encore : `price_reduced_eur` à venir)
+
+**Limites du modèle v1 (à documenter et affiner) :**
+- Calibré sur 3 prix observés Trainline (12/08/2026) ; courbe unique `a·√km + b·km` + échelle par région.
+- Distance = haversine × 1,17 le long des arrêts (approximation de la longueur de voie).
+- Région d'un train = région majoritaire de ses arrêts (inconnues : gares frontalières, 917/3462).
+- Certains prix courts/moyens sont surévalués (ex. Dijon-Besançon ≈ 20 € estimé vs ≈ 12 € réel).
 
 **Dépendances :** T5, T6, T8.
 
