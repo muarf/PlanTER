@@ -1481,3 +1481,14 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
 - Rechargement de systemd, redémarrage de `ter-finder-pricing.service` et rechargement de Nginx.
 - Un test HTTP (curl) confirme qu'aucune requête n'est plus loguée par Nginx dans `betater_zvz_fr_access.log`, ni par Uvicorn dans journalctl.
 
+## 39. T13 — Création de la page À propos (13/08/2026)
+
+**Contexte.** Ajout d'une page manifestant la philosophie du projet planTER (l'école buissonnière du rail, le voyage vs la vitesse, la liberté tarifaire des cartes de réduction, le paiement en espèces anonyme en gare de campagne et l'importance de ralentir).
+
+**Modifications.**
+- **Page à propos** : Création de `web/about.html` contenant le texte philosophique rédigé en français.
+- **Footer** : Modification de `web/index.html` pour insérer un lien vers `/about.html` dans le footer du site à côté des cartes de réduction et de la confidentialité.
+
+**Validation.**
+- Page accessible localement et sur le serveur de démonstration. Le style visuel s'intègre harmonieusement avec la charte graphique existante.
+
