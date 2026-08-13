@@ -1,4 +1,4 @@
-# TER Finder
+# planTER
 
 ![Build Android APK](https://github.com/muarf/PlanTER/actions/workflows/build-apk.yml/badge.svg)
 
@@ -10,7 +10,7 @@ Voir [`PLAN.md`](PLAN.md) pour le cahier des charges complet et le découpage en
 ## Principe
 
 Les outils existants privilégient TGV / Intercités et cachent les trajets régionaux.
-TER Finder ne propose **que des trajets composés exclusivement de TER**, avec jusqu'à
+planTER ne propose **que des trajets composés exclusivement de TER**, avec jusqu'à
 **3 correspondances**, à partir des horaires officiels SNCF (données open data).
 
 ## Pipeline de données (Tâche T1)

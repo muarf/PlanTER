@@ -1,4 +1,4 @@
-# TER Finder — Walkthrough T1
+# planTER — Walkthrough T1
 
 Document de suivi de la **Tâche T1** (pipeline de données + filtre TER), exécutée le
 10/08/2026. Il consigne les commandes exactes, l'arborescence produite et les
@@ -513,7 +513,7 @@ lancé comme l'utilisateur `ubuntu`, restart on-failure, activé au boot :
 
 ```ini
 [Unit]
-Description=TER Finder API + site web (FastAPI/McRAPTOR)
+Description=planTER API + site web (FastAPI/McRAPTOR)
 After=network.target
 
 [Service]
@@ -625,7 +625,7 @@ App Android native réutilisant la SPA web (même codebase), buildée en CI.
 
 ### Fichiers ajoutés
 
-- `package.json` / `capacitor.config.json` (`appId fr.zvz.terfinder`, `appName TER Finder`, `webDir: web`).
+- `package.json` / `capacitor.config.json` (`appId fr.zvz.terfinder`, `appName planTER`, `webDir: web`).
 - `android/` : projet natif généré par `npx cap add android` (commité ; `assets/public` et `capacitor.config.json` régénérés par `npx cap sync`).
 - `.github/workflows/build-apk.yml` : checkout → node 22 (`npm install`) → `npx cap sync android` → JDK 21 (temurin, cache gradle) → `./gradlew assembleDebug` → upload artefact `ter-finder-debug-apk`.
 - `.gitignore`/`.gitattributes` (données, `.venv`, `node_modules`, build android exclus).
@@ -867,7 +867,7 @@ Analyse comportementale de la tarification régionale des TER sur des trajets av
 1. **La dégressivité sur parcours global** : Sur un trajet mono-régional (ex: `Paris ➔ Dijon ➔ Besançon`, géré de bout en bout par la région Bourgogne-Franche-Comté), le prix est calculé sur la distance totale de 405 km en appliquant la dégressivité kilométrique. Le prix du billet unique est de **41,00 €** (alors que la somme des billets pris séparément est de 63,60 €).
 2. **La somme par rupture de convention interrégionale** : Sur un trajet pluri-régional sans convention spécifique (ex: `Lille ➔ Amiens ➔ Rouen`), la correspondance à Amiens fait passer de la région Hauts-de-France à la région Normandie. Le prix final facturé (notamment constaté à **43,00 €** sur Trainline) est la somme des deux segments régionaux séparés (22,10 € + 20,30 €).
 
-### Impacts pour l'architecture TER Finder
+### Impacts pour l'architecture planTER
 Toute future fonctionnalité de tarification ne pourra pas se baser sur une simple addition des segments de voyage. L'algorithme devra déterminer les régions organisatrices de chaque étape pour décider si le barème dégressif s'applique globalement sur la distance totale cumulée ou si les tarifs par zone/région doivent être sommés de manière disjointe.
 
 ## 25. Exécution T11 (cartes de réduction TER) — 12/08/2026

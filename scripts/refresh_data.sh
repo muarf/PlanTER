@@ -45,21 +45,21 @@ log_to_journal "début du refresh (couverture actuelle : $COV_BEFORE)"
 LOG "1/5 téléchargement GTFS SNCF"
 if ! $PY -m src.download; then
   log_to_journal "ÉCHEC 1/5 download — on garde les données actuelles"
-  send_telegram_alert "❌ [TER Finder] Échec 1/5 : Téléchargement du GTFS SNCF."
+  send_telegram_alert "❌ [planTER] Échec 1/5 : Téléchargement du GTFS SNCF."
   write_status "error" "" ""; exit 1
 fi
 
 LOG "2/5 filtrage TER"
 if ! $PY -m src.filter_ter; then
   log_to_journal "ÉCHEC 2/5 filter — on garde les données actuelles"
-  send_telegram_alert "❌ [TER Finder] Échec 2/5 : Filtrage TER."
+  send_telegram_alert "❌ [planTER] Échec 2/5 : Filtrage TER."
   write_status "error" "" ""; exit 1
 fi
 
 LOG "3/5 validation"
 if ! $PY -m src.validate_ter; then
   log_to_journal "ÉCHEC 3/5 validation — on garde les données actuelles"
-  send_telegram_alert "❌ [TER Finder] Échec 3/5 : Validation du GTFS-TER."
+  send_telegram_alert "❌ [planTER] Échec 3/5 : Validation du GTFS-TER."
   write_status "error" "" ""; exit 1
 fi
 
@@ -69,7 +69,7 @@ if ! $PY -m src.build_graph \
     --input data/ter/gtfs_ter.zip --output data/graph.bin \
     --interchange config/interchange.yaml --paris-links config/paris_links.yaml; then
   log_to_journal "ÉCHEC 4/5 build — rollback du graphe précédent"
-  send_telegram_alert "❌ [TER Finder] Échec 4/5 : Construction du graphe de routage."
+  send_telegram_alert "❌ [planTER] Échec 4/5 : Construction du graphe de routage."
   cp -f data/graph.bin.prev data/graph.bin 2>/dev/null || true
   write_status "error" "" ""; exit 1
 fi
@@ -80,7 +80,7 @@ LOG "5/5 redémarrage du service API"
 START_BEFORE=$(systemctl show -p ActiveEnterTimestamp --value ter-finder.service 2>/dev/null || true)
 if ! systemctl restart ter-finder.service; then
   log_to_journal "ALERTE : systemctl restart ter-finder.service a échoué"
-  send_telegram_alert "❌ [TER Finder] Échec 5/5 : Redémarrage du service API via systemd."
+  send_telegram_alert "❌ [planTER] Échec 5/5 : Redémarrage du service API via systemd."
   write_status "degraded" "" ""
   exit 1
 fi
@@ -98,7 +98,7 @@ for i in 1 2 3 4 5; do
 done
 if [ -z "$OK" ]; then
   log_to_journal "ALERTE : service API injoignable ou non redémarré après refresh"
-  send_telegram_alert "❌ [TER Finder] Échec : Service API injoignable ou non redémarré après refresh des données."
+  send_telegram_alert "❌ [planTER] Échec : Service API injoignable ou non redémarré après refresh des données."
   write_status "degraded" "" ""
   exit 1
 fi

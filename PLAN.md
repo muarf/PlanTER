@@ -1,6 +1,6 @@
-# PLAN — TER Finder : recherche de trajets 100% TER en France
+# PLAN — planTER : recherche de trajets 100% TER en France
 
-> Ce document est le cahier des charges du projet **TER Finder** : un moteur de recherche d'itinéraires qui ne propose QUE des trajets en train régional (TER), à destination d'un site web et d'une application mobile.
+> Ce document est le cahier des charges du projet **planTER** : un moteur de recherche d'itinéraires qui ne propose QUE des trajets en train régional (TER), à destination d'un site web et d'une application mobile.
 >
 > Il est rédigé pour être **divisé en tâches indépendantes**, chacune confiée à un agent IA. Chaque section « Tâche » est auto-contenue : objectif, spécifications, critères d'acceptation, dépendances.
 >
@@ -37,7 +37,7 @@
 
 Les sites et applications existants (SNCF Connect, Google Maps, Trainline…) calculent des itinéraires multi-modes et privilégient systématiquement le TGV/Intercités dès qu'une liaison longue distance existe. Résultat : de nombreux trajets réalisables **uniquement en TER** (avec correspondances régionales) sont invisibles ou très difficiles à trouver, même s'ils existent.
 
-**Objectif de TER Finder :** proposer un outil de recherche d'itinéraires qui ne montre **que des trajets composés exclusivement de trains TER (et cars TER)** , avec jusqu'à **3 correspondances**, et qui les mette en avant avec des horaires fiables issus des données officielles SNCF.
+**Objectif de planTER :** proposer un outil de recherche d'itinéraires qui ne montre **que des trajets composés exclusivement de trains TER (et cars TER)** , avec jusqu'à **3 correspondances**, et qui les mette en avant avec des horaires fiables issus des données officielles SNCF.
 
 Positionnement :
 - **Gratuit** pour les utilisateurs.
@@ -60,7 +60,7 @@ Trajet **Paris → Dijon → Besançon** (trajet réel de l'utilisateur, départ
 > canonique doit toujours être résolu à la date demandée via `calendar_dates`, jamais
 > supposé régulier.
 
-Ce trajet doit être **retrouvé et affiché** par TER Finder, en tête des résultats.
+Ce trajet doit être **retrouvé et affiché** par planTER, en tête des résultats.
 Il sert de test de validation de bout en bout (cf. Tâches T2, T3, T4).
 
 ## 3. Sources de données
@@ -757,4 +757,4 @@ L'intégration d'une estimation tarifaire fiable au sein de l'application doit t
    - *Exemple canonique* : `Lille ➔ Amiens ➔ Rouen` (249 km). Lille-Amiens dépend des Hauts-de-France (22,10 €) et Amiens-Rouen dépend de la Normandie (20,30 €) $\rightarrow$ Le prix est la somme des deux billets $\rightarrow$ **43,00 €** (tarif Trainline constaté).
 
 ### Recommandation d'implémentation :
-Pour estimer correctement les prix dans TER Finder, le moteur ne doit pas additionner systématiquement les segments, mais détecter l'autorité organisatrice de chaque segment (présente dans le GTFS) pour appliquer le barème dégressif sur la distance cumulée d'un seul bloc lorsque c'est possible.
+Pour estimer correctement les prix dans planTER, le moteur ne doit pas additionner systématiquement les segments, mais détecter l'autorité organisatrice de chaque segment (présente dans le GTFS) pour appliquer le barème dégressif sur la distance cumulée d'un seul bloc lorsque c'est possible.
