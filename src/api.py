@@ -25,7 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope, Receive, Send
 
 from src.graph import Graph, ALIASES
-from src.raptor import RaptorEngine
+from src.raptor import RaptorEngine, _iso as _iso_min
 from src import gtfs_rt, trainline, trainline_cards
 from src.pricing import PricingEngine
 
@@ -375,6 +375,28 @@ def journeys(
             jd["price_normal_eur"] = price_info.pop("price_normal_eur")
             jd["price_reduced_eur"] = price_info.pop("price_reduced_eur")
             jd["pricing"] = price_info
+            # §32 — découpage intra-train : ids nus, horodatage ISO et lien de
+            # réservation par segment (avec la meilleure carte de sa région).
+            split = price_info.get("split")
+            if split:
+                region_card = {c["region"]: c["id"] for c in price_info.get("cards", [])}
+                for seg in split["segments"]:
+                    seg["from"]["stop_area_id"] = _bare(seg["from"]["stop_area_id"])
+                    seg["to"]["stop_area_id"] = _bare(seg["to"]["stop_area_id"])
+                    seg["from"]["time"] = _iso_min(d, seg.pop("departure_min"))
+                    seg["to"]["time"] = _iso_min(d, seg.pop("arrival_min"))
+                    seg["booking"] = None
+                    seg_date = seg["from"]["time"][:10]
+                    seg_time = seg["from"]["time"][11:16]
+                    url = trainline.booking_url(
+                        seg["from"]["stop_area_id"], seg["to"]["stop_area_id"], seg_date, seg_time
+                    )
+                    if url:
+                        cid = region_card.get(seg["region"])
+                        seg["booking"] = {
+                            "provider": "trainline",
+                            "url": trainline_cards.booking_url(url, [cid]) if cid else url,
+                        }
         bookable = 0
         # T11 — leg ferroviaire de départ et d'arrivée (marches exclues), pour
         # le lien « trajet total » (une seule réservation de bout en bout).

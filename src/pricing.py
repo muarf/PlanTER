@@ -165,6 +165,80 @@ class PricingEngine:
             self._leg_km[key] = km * self.rail_factor
         return self._leg_km[key]
 
+    # -------------------------------------- segments régionaux intra-train
+    def _segment(self, trip_idx: int, i0: int, i1: int, region: str) -> dict:
+        """Segment régional [positions i0..i1] d'un trip : gares extrêmes,
+        distance (haversine × rail_factor) et horaires (minutes minuit)."""
+        stops = self.graph.trips[trip_idx].stop_times
+        gs = self.graph.stops
+        km = 0.0
+        for k in range(i0, i1):
+            s1, s2 = gs[stops[k].stop], gs[stops[k + 1].stop]
+            km += haversine_km(s1.lat, s1.lon, s2.lat, s2.lon)
+        return {
+            "region": region,
+            "from": {"stop_area_id": gs[stops[i0].stop].id, "name": gs[stops[i0].stop].name},
+            "to": {"stop_area_id": gs[stops[i1].stop].id, "name": gs[stops[i1].stop].name},
+            "km": round(km * self.rail_factor, 1),
+            "departure_min": stops[i0].dep,
+            "arrival_min": stops[i1].arr,
+        }
+
+    def trip_region_segments(self, trip_idx: int, board: int, alight: int) -> list[dict]:
+        """Découpage de la portion montée->descente d'un train en segments
+        régionaux consécutifs (T12 §32).
+
+        On groupe les arrêts consécutifs de même région le long des
+        `stop_times` ; à chaque bascule de région, la gare de jonction est le
+        dernier arrêt du segment sortant. Les arrêts de région inconnue sont
+        absorbés par le segment courant (pas de fausse coupure)."""
+        stops = self.graph.trips[trip_idx].stop_times
+        bi = ai = -1
+        for i, st in enumerate(stops):
+            if st.stop == board and bi < 0:
+                bi = i
+            if st.stop == alight:
+                ai = i
+        if not (0 <= bi < ai):
+            return [self._segment(trip_idx, 0, len(stops) - 1, self.trip_region(trip_idx))]
+        segments: list[dict] = []
+        cur = self.stop_region(stops[bi].stop)
+        begin = bi
+        for i in range(bi + 1, ai + 1):
+            region = self.stop_region(stops[i].stop)
+            if region != cur and region != "INCONNUE" and cur != "INCONNUE":
+                segments.append(self._segment(trip_idx, begin, i - 1, cur))
+                cur = region
+                # le segment suivant démarre à la gare de jonction (dernier
+                # arrêt de la région sortante) : les billets sont contigus et
+                # chacun démarre là où on découpe (ex. Mâcon).
+                begin = i - 1
+        segments.append(self._segment(trip_idx, begin, ai, cur))
+        # Nettoyage (§32) : les segments de distance nulle (région limitrophe
+        # tenant sur un seul arrêt, ex. Île-de-France à Paris Gare de Lyon) ne
+        # font pas un billet à part. Ils sont absorbés dans le segment voisin
+        # (pour les tout premiers, on remonte la gare de montée) ; les segments
+        # consécutifs de même région sont ensuite fusionnés.
+        useful = [i for i, seg in enumerate(segments) if seg["km"] > 0.0]
+        if not useful:
+            return segments
+        out: list[dict] = []
+        for idx, seg in enumerate(segments):
+            if seg["km"] > 0.0:
+                if out and out[-1]["region"] == seg["region"]:
+                    out[-1]["to"] = seg["to"]
+                    out[-1]["arrival_min"] = seg["arrival_min"]
+                    out[-1]["km"] = round(out[-1]["km"] + seg["km"], 1)
+                else:
+                    out.append(dict(seg))
+            elif out:
+                out[-1]["to"] = seg["to"]
+                out[-1]["arrival_min"] = seg["arrival_min"]
+        for i in range(useful[0]):
+            out[0]["from"] = segments[i]["from"]
+            out[0]["departure_min"] = segments[i]["departure_min"]
+        return out
+
     # ---------------------------------------------------------------- tarif
     def fare(self, km: float, region: str) -> float:
         """Prix estimé d'un billet sur `km` km dans `region`."""
@@ -187,6 +261,7 @@ class PricingEngine:
 
         legs: list[dict] = []
         regions: set[str] = set()
+        card_regions: set[str] = set()
         total_km = 0.0
         for leg in rail:
             trip_idx = self.graph.trip_index.get(leg.trip_id)
@@ -201,7 +276,16 @@ class PricingEngine:
             region = self.trip_region(trip_idx)
             total_km += km
             regions.add(region)
-            legs.append({"line": leg.line, "km": round(km, 1), "region": region})
+            card_regions.add(region)
+            entry = {"line": leg.line, "km": round(km, 1), "region": region}
+            # §32 — un même train traversant plusieurs régions : on annonce le
+            # découpage (billet par segment régional) sans changer le prix
+            # mono/pluri, qui reste un billet unique dégressif par train.
+            segs = self.trip_region_segments(trip_idx, board, alight)
+            if len(segs) > 1:
+                entry["segments"] = segs
+                card_regions.update(s["region"] for s in segs)
+            legs.append(entry)
 
         rule = "mono_region" if len(regions) == 1 else "pluri_region"
         if rule == "mono_region":
@@ -212,7 +296,9 @@ class PricingEngine:
 
         # Cartes de réduction : meilleure réduction par région, appliquée sur
         # le billet global (mono-région) ou sur chaque billet de tronçon. Une
-        # carte n'est listée que si sa région d'application figure au trajet.
+        # carte n'est listée que si sa région d'application figure au trajet :
+        # région majoritaire d'un train OU région traversée par un train
+        # découpé en segments (§32).
         applied: list[dict] = []
         pay_by_region: dict[str, float] = {}
         for cid in cards or []:
@@ -220,7 +306,7 @@ class PricingEngine:
             if card is None:
                 continue
             info = self.card_info(card)
-            if info["pay"] is None or info["region"] not in regions:
+            if info["pay"] is None or info["region"] not in card_regions:
                 continue
             applied.append({
                 "id": cid, "name": card.get("name", cid),
@@ -242,6 +328,40 @@ class PricingEngine:
                 reduced += self._discount(fare, pay) if pay is not None else fare
             price_reduced_eur = round(reduced, 2)
 
+        # §32 — annonce du découpage intra-train : gares de jonction et
+        # billetterie par segment régional (chaque segment tarifé avec la
+        # meilleure carte de sa région). `price_reduced_eur` reste inchangé.
+        split = None
+        split_legs = [l for l in legs if l.get("segments")]
+        if split_legs:
+            segments_out: list[dict] = []
+            junction_stations: list[str] = []
+            split_regions: list[str] = []
+            price_split = 0.0
+            price_split_reduced = 0.0
+            for l in split_legs:
+                segs = l["segments"]
+                for s in segs:
+                    fare = self.fare(s["km"], s["region"])
+                    pay = pay_by_region.get(s["region"])
+                    red = self._discount(fare, pay) if pay is not None else fare
+                    segments_out.append({**s, "fare_eur": fare, "fare_reduced_eur": red})
+                    price_split += fare
+                    price_split_reduced += red
+                    if s["region"] not in split_regions:
+                        split_regions.append(s["region"])
+                for i in range(len(segs) - 1):
+                    junction = segs[i]["to"]["name"]
+                    if junction not in junction_stations:
+                        junction_stations.append(junction)
+            split = {
+                "junction_stations": junction_stations,
+                "regions": split_regions,
+                "segments": segments_out,
+                "price_split_eur": round(price_split, 2),
+                "price_reduced_split_eur": round(price_split_reduced, 2),
+            }
+
         return {
             "rule": rule,
             "regions": sorted(regions),
@@ -250,5 +370,6 @@ class PricingEngine:
             "price_normal_eur": total_eur,
             "price_reduced_eur": price_reduced_eur,
             "cards": applied,
+            "split": split,
             "note": "prix estimés (modèle v1 calibré sur 3 prix observés Trainline, 12/08/2026)",
         }

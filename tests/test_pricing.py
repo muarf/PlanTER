@@ -211,6 +211,83 @@ class PricingTestCase(unittest.TestCase):
         expected = round(round(self.pe.fare(hdf_km, "Hauts-de-France") * 0.5 / 0.05) * 0.05, 2) + self.pe.fare(norm_km, "Normandie")
         self.assertAlmostEqual(info["price_reduced_eur"], round(expected, 2), delta=0.01)
 
+    # ------------------------------------------------------- §32 split intra-train
+    ILLICO_SOLIDAIRE = "illico-solidaire"
+
+    def _k7_0734(self):
+        """Trajet Paris Gare de Lyon -> Lyon Part Dieu sur le TER K7 de 07h34."""
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Lyon Part Dieu"),
+            7 * 60, 2, "train_only", None,
+        )
+        return next(
+            (j for j in js if j.legs and j.legs[0].line == "K7" and j.legs[0].from_time == 454),
+            None,
+        )
+
+    def test_k7_paris_lyon_jonction_macon(self):
+        # Le TER K7 de 07h34 traverse la BFC puis l'ARA : la jonction se situe
+        # à Mâcon (dernier arrêt BFC avant Belleville-sur-Saône, Rhône).
+        j = self._k7_0734()
+        self.assertIsNotNone(j, "TER K7 07:34 Paris GDL -> Lyon introuvable")
+        leg = j.legs[0]
+        tidx = self.g.trip_index[leg.trip_id]
+        segs = self.pe.trip_region_segments(tidx, self.g.stop_index[leg.from_id], self.g.stop_index[leg.to_id])
+        self.assertEqual(len(segs), 2)
+        self.assertEqual(segs[0]["region"], "Bourgogne-Franche-Comté")
+        self.assertEqual(segs[0]["to"]["name"], "Mâcon")
+        self.assertEqual(segs[1]["region"], "Auvergne-Rhône-Alpes")
+        self.assertEqual(segs[1]["to"]["name"], "Lyon Part Dieu")
+
+    def test_k7_paris_lyon_split_annonce_et_deux_cartes(self):
+        # Avec BFC solidaire + illico solidaire : le découpage à Mâcon est
+        # annoncé, chaque segment est réduit par la carte de sa région, et le
+        # prix mono-région (billet unique dégressif) reste inchangé.
+        j = self._k7_0734()
+        self.assertIsNotNone(j, "TER K7 07:34 introuvable")
+        info = self.pe.journey_price(j, cards=[BFC_SOLIDAIRE, self.ILLICO_SOLIDAIRE])
+        self.assertEqual(info["rule"], "mono_region")
+        split = info["split"]
+        self.assertIsNotNone(split)
+        self.assertEqual(split["junction_stations"], ["Mâcon"])
+        self.assertEqual(len(split["segments"]), 2)
+        seg1, seg2 = split["segments"]
+        self.assertEqual(seg1["region"], "Bourgogne-Franche-Comté")
+        self.assertEqual(seg1["from"]["name"], "Paris Gare de Lyon Hall 1 - 2")
+        self.assertEqual(seg1["to"]["name"], "Mâcon")
+        self.assertEqual(seg2["region"], "Auvergne-Rhône-Alpes")
+        self.assertEqual(seg2["from"]["name"], "Mâcon")
+        self.assertEqual(seg2["to"]["name"], "Lyon Part Dieu")
+        # billets contigus : la somme des km des segments vaut le total
+        self.assertAlmostEqual(round(seg1["km"] + seg2["km"], 1), info["km"], delta=0.5)
+        # les deux cartes sont appliquées (chacune sur son segment)
+        applied = {c["region"] for c in info["cards"]}
+        self.assertIn("Bourgogne-Franche-Comté", applied)
+        self.assertIn("Auvergne-Rhône-Alpes", applied)
+        # -75 % sur chaque segment
+        self.assertAlmostEqual(seg1["fare_reduced_eur"], round(seg1["fare_eur"] * 0.25, 2), delta=0.05)
+        self.assertAlmostEqual(seg2["fare_reduced_eur"], round(seg2["fare_eur"] * 0.25, 2), delta=0.05)
+        self.assertAlmostEqual(split["price_reduced_split_eur"], round(seg1["fare_reduced_eur"] + seg2["fare_reduced_eur"], 2), delta=0.01)
+        # le prix mono-région (billet unique dégressif) est inchangé
+        plain = self.pe.journey_price(j, cards=[BFC_SOLIDAIRE])
+        self.assertEqual(info["price_reduced_eur"], plain["price_reduced_eur"])
+        # sans cartes, pas de split
+        base = self.pe.journey_price(j)
+        self.assertEqual(base["price_normal_eur"], info["price_normal_eur"])
+
+    def test_paris_dijon_meme_train_pas_de_split(self):
+        # Paris -> Dijon sur le même K7 ne traverse qu'une région utile (BFC) :
+        # aucun découpage annoncé.
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Dijon"),
+            7 * 60, 1, "train_only", None,
+        )
+        j = next((j for j in js if j.legs and j.legs[0].line == "K7"), None)
+        self.assertIsNotNone(j, "K7 Paris -> Dijon introuvable")
+        info = self.pe.journey_price(j)
+        self.assertIsNotNone(info)
+        self.assertIsNone(info["split"])
+
 
 if __name__ == "__main__":
     unittest.main()

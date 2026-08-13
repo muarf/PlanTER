@@ -1123,3 +1123,48 @@ Tempo Paris +26 (−60 % vs −25/−50 %), illico LIBERTÉ (−60 % vs −25/�
 ZOU! Études (−50 % vs aucune) et Primo (aucune vs −50 %). `config/pricing.yaml`
 
 mis à jour pour être cohérent avec cards.html ; vérifié sur la beta.
+
+## 32. T12 — Découpage d'un billet intra-train multi-régions (13/08/2026)
+
+**Contexte.** Un même TER peut traverser plusieurs régions (ex. K7 Paris Gare de
+Lyon → Lyon Part Dieu : Bourgogne-Franche-Comté puis Auvergne-Rhône-Alpes).
+Les cartes de réduction sont régionales : il faut alors couper le billet à la
+gare frontière pour utiliser la carte de chaque région (§29 n'appliquait qu'une
+région par train — la majorité de ses arrêts).
+
+**Implémentation (pricing).**
+- `PricingEngine.trip_region_segments(trip_idx, board, alight)` découpe la
+  portion montée→descente d'un train le long de ses `stop_times`, en groupant
+  les arrêts consécutifs de même région (`stop_region`). Chaque bascule de
+  région produit un segment ; le segment suivant démarre à la gare de jonction
+  (dernier arrêt de la région sortante) pour que les billets soient contigus et
+  que chacun parte de la gare de coupure.
+- Nettoyage : les segments de distance nulle (région limitrophe tenant sur un
+  seul arrêt, ex. Île-de-France à Paris Gare de Lyon) sont absorbés dans le
+  segment voisin, en remontant la gare de montée pour le premier.
+- `journey_price` ajoute `pricing.split` dès qu'un leg traverse plusieurs
+  régions : `junction_stations` (ex. `["Mâcon"]`), `regions`, `segments[]`
+  (région, gares, km, tarif plein et réduit de la meilleure carte de la région)
+  et `price_split_eur` / `price_reduced_split_eur`. Le prix affiché
+  `price_reduced_eur` reste inchangé (billet unique dégressif, mono/pluri) :
+  le découpage est annoncé comme optimisation, pas substitué.
+
+**API.** Pour chaque segment découpé, `/v1/journeys` expose un `booking`
+Trainline (date/heure du segment, meilleure carte de sa région ajoutée à
+l'URL). Les cartes applicables incluent désormais les régions traversées d'un
+train découpé (et non plus seulement sa région majoritaire).
+
+**Web.** `priceBlock` (web/app.js) affiche un encart : « Ce train traverse
+BFC et ARA : pour utiliser la carte de chaque région, découpez le billet à
+Mâcon. » avec les deux billets (gares, km, prix réduit) et leur lien de
+réservation, plus le total découpé.
+
+**Exemple vérifié (K7 07:34, Paris GDL → Lyon Part Dieu, 13/08/2026).**
+BFC solidaire + illico solidaire : jonction à Mâcon ; billet 1 Paris → Mâcon
+(460 km, ≈ 43,90 € → 10,95 €), billet 2 Mâcon → Lyon Part Dieu (74,8 km,
+≈ 17,20 € → 4,30 €) ; total découpé ≈ 61,10 € plein tarif → 15,25 € réduit.
+Le prix mono-région (billet unique dégressif BFC) reste ≈ 47,55 € → 11,90 €.
+
+**Tests.** `test_k7_paris_lyon_jonction_macon`,
+`test_k7_paris_lyon_split_annonce_et_deux_cartes`,
+`test_paris_dijon_meme_train_pas_de_split` (101 tests au total, OK).
