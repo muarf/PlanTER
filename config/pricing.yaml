@@ -39,6 +39,20 @@ regions:
   Normandie:
     scale: 0.9575        # 112 km -> 20,30 €
 
+# T12 §33/§34 — Accords interrégionaux (recherche 13/08/2026).
+#
+# Comment découper un train qui traverse une paire de régions limitrophes :
+#   split (défaut) : accord bilatéral — 2 billets contigus découpés à la gare
+#                    de jonction (ex. BFC↔AURA à Mâcon, Mobigo + illico) ;
+#   gap            : pas d'accord — segment plein tarif interrégional entre la
+#                    dernière gare de la région sortante et la première de la
+#                    région entrante (3 billets, ex. AURA↔PACA : Pierrelatte →
+#                    Bollène-la-Croisière). La règle s'applique dans les deux
+#                    sens.
+# Table issue de la cartographie §34 ; paires absentes = split (défaut).
+cross_region_rules:
+  - [Auvergne-Rhône-Alpes, Provence-Alpes-Côte d'Azur, gap]
+
 # T12 — Cartes de réduction TER (ESTIMATION v1).
 #
 # Pour chaque carte de config/trainline_cards.json, le moteur calcule la

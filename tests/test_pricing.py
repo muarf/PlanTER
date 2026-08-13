@@ -26,6 +26,7 @@ BFC_26 = "5be729fcfc26caa921c53f6d836175d832c288ca"
 BFC_SOLIDAIRE = "2a730e22c0be4cf0030f89205f540fe39e8dca6b"
 HDF = "7d76cf68a01468562cde7088753e8a4673fcda30"
 ZOU_ETUDES = "d55f73482d9d2d0f7ccc92b83a13cc0a9b1d788d"
+ZOU_SOLIDAIRE = "50a5c534742f0416d10ffc7081f48fb6f4a537bc"
 ABO_TEMPO = "8343c7a009b1f83bccd79d21150724227a19e3ad"
 
 
@@ -295,6 +296,76 @@ class PricingTestCase(unittest.TestCase):
         info = self.pe.journey_price(j)
         self.assertIsNotNone(info)
         self.assertIsNone(info["split"])
+
+    # ---------------------------------------------- §33 pas d'accord AURA↔PACA
+    def _k14_0640_lyon_marseille(self):
+        """TER K14 06:40 Lyon Part Dieu -> Marseille Saint-Charles (via
+        Pierrelatte puis Bollène la Croisière)."""
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Lyon Part Dieu"), self.resolve("Marseille Saint-Charles"),
+            6 * 60, 1, "train_only", None,
+        )
+        return next(
+            (j for j in js if j.legs and j.legs[0].line == "K14" and j.legs[0].from_time == 440),
+            None,
+        )
+
+    def test_lyon_marseille_gap_pierrelatte_bollene(self):
+        # Le K14 06:40 traverse l'ARA puis la PACA : pas d'accord interrégional
+        # (§33/§34), découpage en 3 billets — ARA jusqu'à Pierrelatte, PLEIN
+        # TARIF Pierrelatte -> Bollène la Croisière, puis PACA depuis Bollène.
+        j = self._k14_0640_lyon_marseille()
+        self.assertIsNotNone(j, "TER K14 06:40 Lyon -> Marseille introuvable")
+        leg = j.legs[0]
+        tidx = self.g.trip_index[leg.trip_id]
+        segs = self.pe.trip_region_segments(
+            tidx, self.g.stop_index[leg.from_id], self.g.stop_index[leg.to_id]
+        )
+        self.assertEqual(len(segs), 3)
+        self.assertEqual(segs[0]["region"], "Auvergne-Rhône-Alpes")
+        self.assertEqual(segs[0]["from"]["name"], "Lyon Part Dieu")
+        self.assertEqual(segs[0]["to"]["name"], "Pierrelatte")
+        self.assertIs(segs[1].get("gap"), True)
+        self.assertEqual(segs[1]["region"], "Auvergne-Rhône-Alpes")
+        self.assertEqual(segs[1]["from"]["name"], "Pierrelatte")
+        self.assertEqual(segs[1]["to"]["name"], "Bollène la Croisière")
+        self.assertEqual(segs[2]["region"], "Provence-Alpes-Côte d'Azur")
+        self.assertEqual(segs[2]["from"]["name"], "Bollène la Croisière")
+        self.assertEqual(segs[2]["to"]["name"], "Marseille Saint-Charles")
+
+    def test_lyon_marseille_zou_seulement_cote_paca(self):
+        # Avec ZOU! Solidaire : la réduction ne s'applique QUE sur le segment
+        # PACA (Bollène -> Marseille) ; le segment ARA et le plein tarif
+        # interrégional restent au tarif plein.
+        j = self._k14_0640_lyon_marseille()
+        self.assertIsNotNone(j, "TER K14 06:40 introuvable")
+        info = self.pe.journey_price(j, cards=[ZOU_SOLIDAIRE])
+        split = info["split"]
+        self.assertIsNotNone(split)
+        self.assertEqual(split["junction_stations"], [])
+        self.assertEqual(len(split["segments"]), 3)
+        seg_ara, seg_gap, seg_paca = split["segments"]
+        # segments ARA et interrégional : plein tarif, pas de réduction
+        self.assertEqual(seg_ara["fare_reduced_eur"], seg_ara["fare_eur"])
+        self.assertEqual(seg_gap["fare_reduced_eur"], seg_gap["fare_eur"])
+        self.assertIs(seg_gap.get("gap"), True)
+        # segment PACA : -50 % (ZOU! Solidaire)
+        self.assertAlmostEqual(
+            seg_paca["fare_reduced_eur"], round(seg_paca["fare_eur"] * 0.5, 2), delta=0.05
+        )
+        # le total découpé = ARA + plein tarif + PACA réduit
+        expected = round(seg_ara["fare_eur"] + seg_gap["fare_eur"] + seg_paca["fare_reduced_eur"], 2)
+        self.assertEqual(split["price_reduced_split_eur"], expected)
+        # billets contigus : la somme des km des segments couvre le trajet
+        self.assertAlmostEqual(
+            round(seg_ara["km"] + seg_gap["km"] + seg_paca["km"], 1), info["km"], delta=0.5
+        )
+        # seule la carte ZOU est annoncée, et uniquement pour la PACA
+        applied = {c["region"] for c in info["cards"]}
+        self.assertEqual(applied, {"Provence-Alpes-Côte d'Azur"})
+        # le prix affiché devient le total découpé
+        self.assertEqual(info["price_reduced_eur"], split["price_reduced_split_eur"])
+        self.assertEqual(info["price_normal_eur"], split["price_split_eur"])
 
 
 if __name__ == "__main__":

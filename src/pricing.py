@@ -68,6 +68,10 @@ class PricingEngine:
         self.b = float(cfg["b"])
         self.default_scale = float(cfg["default_scale"])
         self.region_scale = {name: float(v["scale"]) for name, v in cfg.get("regions", {}).items()}
+        self._cross_rules: dict[tuple[str, str], str] = {}
+        for a, b, rule in cfg.get("cross_region_rules", []):
+            self._cross_rules[(a, b)] = rule
+            self._cross_rules[(b, a)] = rule
         self._stations = json.loads(regions.read_text(encoding="utf-8"))
         self._stop_region: dict[int, str] = {}
         self._trip_region: dict[int, str] = {}
@@ -208,24 +212,37 @@ class PricingEngine:
             region = self.stop_region(stops[i].stop)
             if region != cur and region != "INCONNUE" and cur != "INCONNUE":
                 segments.append(self._segment(trip_idx, begin, i - 1, cur))
+                if self._cross_rules.get((cur, region)) == "gap":
+                    # §33/§34 — pas d'accord interrégional : segment plein
+                    # tarif entre la dernière gare de la région sortante et la
+                    # première de la région entrante (3 billets, ex. AURA↔PACA
+                    # Pierrelatte -> Bollène-la-Croisière).
+                    gap = self._segment(trip_idx, i - 1, i, cur)
+                    gap["gap"] = True
+                    segments.append(gap)
+                    begin = i
+                else:
+                    # accord bilatéral : le segment suivant démarre à la gare de
+                    # jonction (dernier arrêt de la région sortante) : les
+                    # billets sont contigus (ex. Mâcon).
+                    begin = i - 1
                 cur = region
-                # le segment suivant démarre à la gare de jonction (dernier
-                # arrêt de la région sortante) : les billets sont contigus et
-                # chacun démarre là où on découpe (ex. Mâcon).
-                begin = i - 1
         segments.append(self._segment(trip_idx, begin, ai, cur))
         # Nettoyage (§32) : les segments de distance nulle (région limitrophe
         # tenant sur un seul arrêt, ex. Île-de-France à Paris Gare de Lyon) ne
         # font pas un billet à part. Ils sont absorbés dans le segment voisin
         # (pour les tout premiers, on remonte la gare de montée) ; les segments
-        # consécutifs de même région sont ensuite fusionnés.
+        # consécutifs de même région sont ensuite fusionnés (jamais à travers
+        # un segment `gap`, qui reste un billet à part, §33).
         useful = [i for i, seg in enumerate(segments) if seg["km"] > 0.0]
         if not useful:
             return segments
         out: list[dict] = []
         for idx, seg in enumerate(segments):
             if seg["km"] > 0.0:
-                if out and out[-1]["region"] == seg["region"]:
+                if seg.get("gap"):
+                    out.append(dict(seg))
+                elif out and out[-1]["region"] == seg["region"] and not out[-1].get("gap"):
                     out[-1]["to"] = seg["to"]
                     out[-1]["arrival_min"] = seg["arrival_min"]
                     out[-1]["km"] = round(out[-1]["km"] + seg["km"], 1)
@@ -349,17 +366,23 @@ class PricingEngine:
                 segs = l["segments"]
                 for s in segs:
                     fare = self.fare(s["km"], s["region"])
-                    pay = pay_by_region.get(s["region"])
+                    # §33 — segment interrégional `gap` : plein tarif, aucune
+                    # carte ne s'applique (pas d'accord entre les régions).
+                    pay = None if s.get("gap") else pay_by_region.get(s["region"])
                     red = self._discount(fare, pay) if pay is not None else fare
                     segments_out.append({**s, "fare_eur": fare, "fare_reduced_eur": red})
                     price_split += fare
                     price_split_reduced += red
                     if s["region"] not in split_regions:
                         split_regions.append(s["region"])
-                for i in range(len(segs) - 1):
-                    junction = segs[i]["to"]["name"]
-                    if junction not in junction_stations:
-                        junction_stations.append(junction)
+                # gare(s) de coupure : uniquement pour des billets contigus ;
+                # en présence d'un segment `gap`, l'annonce passe par les gares
+                # frontières du segment plein tarif (§33).
+                if not any(s.get("gap") for s in segs):
+                    for i in range(len(segs) - 1):
+                        junction = segs[i]["to"]["name"]
+                        if junction not in junction_stations:
+                            junction_stations.append(junction)
             split = {
                 "junction_stations": junction_stations,
                 "regions": split_regions,

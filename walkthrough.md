@@ -1170,3 +1170,171 @@ BFC solidaire + illico solidaire : jonction à Mâcon ; billet 1 Paris → Mâco
 **Tests.** `test_k7_paris_lyon_jonction_macon`,
 `test_k7_paris_lyon_split_annonce_et_deux_cartes`,
 `test_paris_dijon_meme_train_pas_de_split` (101 tests au total, OK).
+
+## 33. T12 — Accords interrégionaux : découpe en 2 ou 3 billets (13/08/2026)
+
+**Contexte.** Le §32 découpe un train multi-régions à la gare frontière en
+supposant que la carte de chaque région s'applique de son côté de la coupure.
+La vérification réelle montre que c'est faux : la validité des cartes
+régionales sur les parcours interrégionaux dépend d'accords bilatéraux,
+**directionnels** et propres à chaque paire de régions.
+
+**Mécanisme réel (constats).**
+- Le billet interrégional est vendu au barème de la région de destination aux
+  gares frontières (CGV Mobigo : « pour les parcours ayant pour origine une
+  gare dite frontière, seule la tarification de la région de destination est
+  applicable — ex. St-Amour/Lyon ») ou au barème interrégional spécifique
+  (CGV Trains ZOU! §5.3, ex. PACA/AURA, P = a + bd).
+- Chaque région n'honore que ses propres cartes sur son propre barème.
+- Les cartes sociales/intra-régionales (ex. ZOU! Solidaire, Solidaire+,
+  Études, ZOU!, -26) ne valent que sur le réseau de leur région ; seule
+  ZOU! Malin a une clause interrégionale (« 30 % sur les trajets à destination
+  des régions AURA et Occitanie » — directionnelle).
+- Depuis le 01/07/2022 la tarification nationale (Avantage…) n'est plus
+  acceptée sur les TER/ZOU! (CGV Trains ZOU! §7.7, TER SUD).
+
+**Cas validés (tests utilisateur).**
+- **2 billets — Paris→Lyon via Mâcon (accord BFC↔AURA)** : Paris→Mâcon avec
+  Mobigo (axe conventionné vers Paris Bercy/Gare de Lyon via Laroche-Migennes)
+  puis Mâcon→Lyon avec illico (Mâcon = gare frontière BFC → tarif AURA).
+  Fonctionne.
+- **3 billets — Lyon↔Marseille (pas d'accord AURA↔PACA)** : ni illico sur
+  Lyon→Bollène, ni ZOU! sur Pierrelatte→Marseille, ni ZOU! sur Marseille→Lyon.
+  Le bon découpage est : billet régional AURA jusqu'à sa dernière gare
+  (Pierrelatte), plein tarif interrégional Pierrelatte→Bollène-la-Croisière,
+  billet régional PACA depuis sa première gare (Bollène).
+
+**Conséquence pour le modèle (§32).** L'hypothèse « chaque région s'applique
+de son côté de la coupure » n'est valide que pour les paires avec accord
+bilatéral (2 billets). Pour les autres, il faut un segment interrégional plein
+tarif entre les deux gares frontières (3 billets). Le §32 découpe à la
+dernière gare de la région sortante (contigu) ; pour les paires sans accord il
+faut découper à la frontière réelle : segment régional jusqu'à la dernière
+gare de la région A, segment plein tarif jusqu'à la première gare de la
+région B, segment régional ensuite. À implémenter via une table d'accords par
+paire (voir §34).
+
+## 34. T12 — Cartographie des accords interrégionaux (13/08/2026)
+
+**Méthode.** Recherche web (13/08/2026) sur les paires de régions
+métropolitaines limitrophes (pages TER régionales ter.sncf.com, CGV PDF
+mmt.vsct.fr, viamobigo.fr, zou.maregionsud.fr). Verdicts de première
+approche, à valider au cas par cas.
+
+**Les deux mécanismes « 2 billets » réels.**
+- (a) Coupure réelle à la frontière : deux billets contigus, la carte de
+  chaque région valant jusqu'à / dès la gare de coupure — cas validé
+  BFC↔AURA à Mâcon (Mobigo + illico).
+- (b) Billet interrégional unique (BKRI) : la carte de chaque région donne sa
+  réduction sur le trajet interrégional — la « soudure » de deux billets
+  accolés sur un même train étant officiellement interdite dans toutes les
+  CGV (sauf dérogations scolaires ou abonnés).
+
+Le §32 implémente le mécanisme (a) pour tout train multi-régions. Il n'est
+correct que pour les paires classées « 2 billets » ci-dessous ; pour
+AURA↔PACA il faut un segment plein tarif interrégional entre les deux gares
+frontières (3 billets).
+
+**Tableau (22 paires limitrophes).**
+
+| Paire | Verdict | Gares frontières | Notes |
+|---|---|---|---|
+| IDF ↔ BFC | 2 billets | Laroche-Migennes / Sens (BFC) | Mobigo valable jusqu'à Paris Bercy/GDL (axe conventionné) |
+| IDF ↔ CVL | 2 billets | 1res gares IDF : Houdan, Gazeran, Dourdan | Rémi Liberté valable vers/depuis IDF |
+| IDF ↔ HdF | 2 billets | Creil, Chantilly, Orry (D/H), Trie-Château (J), Plessis-Belleville (K) | Ma Carte TER HdF −50 % vers Paris |
+| IDF ↔ Normandie | 2 billets | Bonnières-sur-Seine (IDF) / Vernon-Giverny (27) | Tempo Paris valable vers Paris |
+| HdF ↔ Normandie | 2 billets | Formerie (HdF) / Serqueux (76) | Convention réciprocité 2025-2028 (Paris exclu) |
+| HdF ↔ Grand Est | 2 billets | Hirson (02) | Réciprocité depuis 2020 (5 dép. HdF ↔ Champagne-Ardenne), hors Paris–Château-Thierry |
+| Grand Est ↔ IDF | 2 billets | Dormans (51) | Fluo −50 % vers Paris Est |
+| Grand Est ↔ CVL | sans objet | — | régions non limitrophes |
+| BFC ↔ CVL | 2 billets | Nevers (58) | règle gare frontière : Nevers→Bourges = tarif CVL seul |
+| BFC ↔ Grand Est | un seul sens | non documentées (Dijon–Troyes/Reims, Dijon/Belfort–Mulhouse) | Mobigo+ / Tarif Jeune vers GE ; carte Fluo vers BFC non documentée |
+| BFC ↔ AURA | 2 billets | Mâcon, St-Amour | illico dès Mâcon (gare frontière BFC → tarif AURA) |
+| CVL ↔ AURA | 2 billets | Nevers (règle gare frontière) | illico ↔ Rémi ; illico non valable Lyon→St-Pierre-des-Corps |
+| CVL ↔ NAQ | 2 billets | non documentées (Vierzon/Bourges–Limoges, Châteauroux–Limoges) | Carte+ NAQ ↔ Rémi |
+| NAQ ↔ AURA | 2 billets | non documentées (Ussel–Clermont, Limoges–Clermont via Montluçon) | Carte+ ↔ illico |
+| CVL ↔ PDL | 2 billets | non documentées (Tours–Angers, Tours–Le Mans, Saumur–Tours) | Rémi ↔ mezzo/mobi |
+| PDL ↔ NAQ | 2 billets | La Rochelle, Bressuire (gares en limite) | mezzo/mobi ↔ Carte+ ; soudure abonnés NAQ depuis 01/07/2025 |
+| AURA ↔ PACA | 3 billets | Pierrelatte (AURA) / Bollène-la-Croisière (PACA) | ZOU! Malin −30 % vers AURA (titulaire seul) ; AURA→PACA sans carte |
+| PACA ↔ Occitanie | 2 billets | Nîmes/Beaucaire ↔ Tarascon/Arles/Avignon | ZOU! Malin −30 % vers OCC (tit. + accompagnant) ; liO ↔ PACA |
+| Occitanie ↔ AURA | 2 billets | non documentée (axe Béziers–Clermont) | liO ↔ illico ; Montpellier↔Lyon transite PACA (3 régions) |
+| Occitanie ↔ NAQ | 2 billets | Valence-d'Agen (OCC) / Agen (NAQ) | barème régional Occitanie appliqué ; Carte+ −50 % vers OCC |
+| PDL ↔ Bretagne | 2 billets | Redon, Vitré | offre BreizhGo « vers PDL −26 » ; tarif Nantes–Rennes |
+| Normandie ↔ PDL | 2 billets | Alençon (61) | Nomad Tempo ↔ mezzo ; barème dédié depuis 01/04/2026 |
+| Normandie ↔ Bretagne | sans objet | — | pas de service TER interrégional notable |
+
+**Cas particuliers.**
+- **AURA↔PACA** : seul cas « 3 billets » identifié. ZOU! Malin donne −30 %
+  vers l'AURA (titulaire seul), illico n'est pas honoré côté Sud ; sens
+  AURA→PACA sans aucune carte. Gares frontières : Pierrelatte (AURA) /
+  Bollène-la-Croisière (PACA). Soudure scolaire tolérée (Pass ZOU! Études
+  jusqu'à Bollène/Veynes + titre AURA depuis Pierrelatte/Luc-en-Diois/
+  Clelles-Mens).
+- **BFC↔Grand Est** : partiel (un sens documenté : Mobigo+ / Tarif Jeune vers
+  GE ; carte Fluo vers BFC non documentée — CGV GE : seules Avantage Sénior
+  −25 % / Liberté 0 %).
+- **Paires sans service TER interrégional notable** : Grand Est↔CVL (non
+  limitrophes), Normandie↔Bretagne.
+- **Relations « 3 régions » hors bilatéral** : Montpellier↔Lyon (transit
+  PACA), Perpignan↔Paris (Intercités).
+
+**Conséquence modèle.** Table d'accords par paire à implémenter : défaut
+« 2 billets » (mécanisme a), exception AURA↔PACA (segment plein tarif entre
+les deux gares frontières), exception BFC↔GE (sens unique). À croiser avec la
+vérification utilisateur des relations réellement vendues par SNCF.
+
+## 35. T12 — Table d'accords interrégionaux : exception AURA↔PACA en 3 billets (13/08/2026)
+
+**Implémentation.** Suite à §33/§34, la découpe contiguë « 2 billets »
+(§32) devient le comportement par défaut pour les paires avec accord
+bilatéral ; une nouvelle règle de segment « **gap** » (plein tarif
+interrégional) matérialise les paires sans accord.
+
+**Modèle.** `config/pricing.yaml` gagne `cross_region_rules: [[Auvergne-Rhône-Alpes, Provence-Alpes-Côte d'Azur, gap]]`, chargé et symétrisé A↔B dans `pricing.py` (`_cross_rules`). Dans `trip_region_segments()` :
+- `_segment()` reçoit la région en paramètre pour dessiner explicitement le
+  gap avec la région sortante ;
+- boucle de découpe : transition de région → sinon gap (`_segment(i-1,i)`
+  étiqueté `gap=True`) ; le gap garde la région sortante (barème
+  interrégional vendu côté région de départ) mais ne peut être réduit par
+  aucune carte ;
+- nettoyage : fusion vers l'extrémité précédente uniquement si le dernier
+  segment n'est pas un gap ; les segments gap sont toujours conservés.
+
+**Tarification.** `journey_price()` : les segments gap sont toujours au
+plein tarif (`fare_reduced_eur == fare_eur`) ; `junction_stations` n'est
+rempli que si aucun gap n'est présent, sinon la frontière du gap annonce la
+coupure. Le correctif §32 (prix affichés = totaux découpés) est conservé, le
+billet unique restant en référence via `single_ticket_eur`. `api.py` : pas
+de carte Trainline sur les segments gap (`cid=None`). `web/app.js`
+(`priceBlock`) : ligne « Interrégional (plein tarif) » pour les gaps et
+annonce adaptée (« pas d'accord tarifaire entre les régions, il faut un
+plein tarif entre Pierrelatte et Bollène la Croisière puis la carte de la
+région suivante »). `web/sw.js` : cache PWA bumpé `v4→v5`.
+
+**Tests.** `tests/test_pricing.py` :
+- `test_lyon_marseille_gap_pierrelatte_bollene` : K14 06:40 Lyon Part Dieu→
+  Marseille Saint-Charles → 3 segments (Lyon→Pierrelatte AURA, gap
+  Pierrelatte→Bollène la Croisière, Bollène→Marseille PACA) ;
+- `test_lyon_marseille_zou_seulement_cote_paca` : ZOU! Solidaire ne réduit
+  que le segment PACA, AURA + gap au plein tarif, `junction_stations=[]`.
+Suite complète : 103/103 OK (dont K7 Paris→Lyon découpé à Mâcon, non
+régressé).
+
+**Vérification API (beta).** Lyon Part Dieu→Marseille Saint-Charles 06:40
+avec illico SOLIDAIRE + ZOU! Solidaire :
+- K14 06:40 : Lyon→Pierrelatte 27,75→6,95 (illico −75 %), gap Pierrelatte→
+  Bollène 7,15 plein tarif, Bollène→Marseille 26,45→13,20 (ZOU −50 %), total
+  61,35→40,55 ;
+- K54 (via Valence) : même structure de gap, total 51,35→37,80.
+
+Paris Gare de Lyon→Marseille Saint-Charles 06:40 (K7 + K4 via Avignon) :
+Paris→Mâcon 43,90→10,95 (Mobigo), Mâcon→Lyon 17,20 plein, Lyon→Pierrelatte
+27,75 plein, gap 7,15 plein, Bollène→Avignon 13,85→6,90 (ZOU), total
+109,85→69,95. Le gap reste présent sur le dernier tronçon AURA→PACA.
+
+**Fausse alerte.** Le 13/08 l'utilisateur a suggéré que illico « pourrait
+aller de Lyon à Bollène » (donc pas de gap). Les CGV illico listent pourtant
+« Sud » parmi les régions limitrophes couvertes (parcours ≤ 2 régions).
+L'utilisateur s'est rétracté (« t'as raison je me suis trompé ») : le test
+empirique §33 tient (illico refusé sur Lyon→Bollène), le modèle gap est
+conservé tel quel.

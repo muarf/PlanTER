@@ -307,14 +307,18 @@ function priceBlock(j) {
   let splitBlock = "";
   const sp = j.pricing.split;
   if (sp) {
+    const gap = sp.segments.find((s) => s.gap);
     const segs = sp.segments
-      .map((s) => `<div class="price-leg split-seg"><span class="price-leg-line">${s.region}</span>
+      .map((s) => `<div class="price-leg split-seg"><span class="price-leg-line">${s.gap ? "Interrégional (plein tarif)" : s.region}</span>
         <span>${s.from.name} → ${s.to.name} · ${s.km} km</span>
         <span class="price-leg-region">${fmtPrice(s.fare_eur)}${s.fare_reduced_eur < s.fare_eur ? ` → ${fmtPrice(s.fare_reduced_eur)}` : ""}</span>
         ${s.booking && s.booking.url ? ` <a class="ticket-chip" href="${s.booking.url}" target="_blank" rel="noopener noreferrer">Réserver</a>` : ""}</div>`)
       .join("");
+    const announce = gap
+      ? `Ce train traverse ${sp.regions.join(" et ")} : pas d'accord tarifaire entre les régions, il faut un plein tarif entre ${gap.from.name} et ${gap.to.name} puis la carte de la région suivante.`
+      : `Ce train traverse ${sp.regions.join(" et ")} : pour utiliser la carte de chaque région, découpez le billet à ${sp.junction_stations.join(" / ")}.`;
     splitBlock = `<div class="price-detail split-note">
-      <div class="price-rule">Ce train traverse ${sp.regions.join(" et ")} : pour utiliser la carte de chaque région, découpez le billet à ${sp.junction_stations.join(" / ")}.</div>
+      <div class="price-rule">${announce}</div>
       ${segs}
       ${sp.single_ticket_eur != null ? `<div class="price-rule">Billet unique (si vendu en une fois) : ≈ ${fmtPrice(sp.single_ticket_eur)}${sp.single_ticket_reduced_eur < sp.single_ticket_eur ? ` → ${fmtPrice(sp.single_ticket_reduced_eur)}` : ""}</div>` : ""}
       <div class="price-split-total">Total billets découpés : ≈ <strong>${fmtPrice(sp.price_reduced_split_eur)}</strong> (plein tarif ${fmtPrice(sp.price_split_eur)})</div>

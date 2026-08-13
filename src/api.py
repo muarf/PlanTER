@@ -392,7 +392,9 @@ def journeys(
                         seg["from"]["stop_area_id"], seg["to"]["stop_area_id"], seg_date, seg_time
                     )
                     if url:
-                        cid = region_card.get(seg["region"])
+                        # §33 — segment interrégional `gap` : plein tarif, sans
+                        # carte (pas d'accord entre les régions).
+                        cid = None if seg.get("gap") else region_card.get(seg["region"])
                         seg["booking"] = {
                             "provider": "trainline",
                             "url": trainline_cards.booking_url(url, [cid]) if cid else url,
