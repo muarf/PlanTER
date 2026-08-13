@@ -7,7 +7,11 @@ Modèle (cf. config/pricing.yaml) :
 - prix d'un billet = scale_region × (a·√km + b·km), arrondi aux 5 centimes,
   plancher min_eur ;
 - agrégation : trajet mono-région -> un billet sur la distance totale cumulée
-  (dégressivité globale) ; pluri-région -> somme des billets par tronçon.
+  (dégressivité globale) ; pluri-région -> somme des billets par tronçon ;
+- cartes de réduction (T12) : chaque carte a une fraction `pay` du plein tarif
+  (0.50 = -50 %) et une région d'application (déduite de son nom). La réduction
+  ne s'applique QUE sur les segments de la région de la carte ; le tarif réduit
+  retenu est la meilleure réduction parmi les cartes demandées.
 
 Les prix sont des ESTIMATIONS : le modèle est calibré sur quelques prix
 observés (Trainline, 12/08/2026) et les barèmes régionaux réels n'y sont pas
@@ -22,6 +26,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml  # noqa: E402
+
+from src import trainline_cards
 
 if TYPE_CHECKING:
     from src.graph import Graph
@@ -66,6 +72,48 @@ class PricingEngine:
         self._stop_region: dict[int, str] = {}
         self._trip_region: dict[int, str] = {}
         self._leg_km: dict[tuple[int, int, int], float] = {}
+        self._card_info: dict[str, dict] = {}
+        self._load_cards(cfg.get("cards", {}))
+
+    # --------------------------------------------------- règles des cartes
+    def _load_cards(self, ccfg: dict) -> None:
+        self.card_default_pay = float(ccfg.get("default_pay", 0.50))
+        self._no_discount_prefixes = tuple(str(p).lower() for p in ccfg.get("no_discount_prefixes", []))
+        self._pay_patterns = [(str(p["contains"]).lower(), float(p["pay"])) for p in ccfg.get("pay_patterns", [])]
+        self._card_by_id = ccfg.get("by_id", {})
+        self._region_keywords = [(str(k["contains"]).lower(), k["region"]) for k in ccfg.get("region_keywords", [])]
+
+    def card_info(self, card: dict) -> dict:
+        """pay (fraction du plein tarif PAYÉE, None si aucune réduction par
+        billet) et région d'application d'une carte TER (config/trainline_cards)."""
+        cid = card["id"]
+        if cid not in self._card_info:
+            name = card.get("name", "")
+            low = name.lower()
+            pay: float | None = None
+            if not any(low.startswith(pref) for pref in self._no_discount_prefixes):
+                ov = self._card_by_id.get(cid)
+                if ov is not None:
+                    pay = None if ov.get("type") == "none" else float(ov.get("pay", self.card_default_pay))
+                else:
+                    for contains, p in self._pay_patterns:
+                        if contains in low:
+                            pay = p
+                            break
+                    if pay is None:
+                        pay = self.card_default_pay
+            region = "INCONNUE"
+            for contains, r in self._region_keywords:
+                if contains in low:
+                    region = r
+                    break
+            self._card_info[cid] = {"pay": pay, "region": region}
+        return self._card_info[cid]
+
+    @staticmethod
+    def _discount(eur: float, pay: float) -> float:
+        """Prix réduit d'un billet plein tarif (arrondi aux 5 centimes)."""
+        return round(round(eur * pay / 0.05) * 0.05, 2)
 
     # ------------------------------------------------------ région d'un arrêt
     def _uic(self, stop_idx: int) -> str | None:
@@ -125,10 +173,13 @@ class PricingEngine:
         return max(self.min_eur, round(round(raw / self.round_to) * self.round_to, 2))
 
     # ------------------------------------------------------------- trajet
-    def journey_price(self, journey) -> dict | None:
+    def journey_price(self, journey, cards: list[str] | None = None) -> dict | None:
         """Prix estimé d'un trajet (legs ferroviaires uniquement).
 
-        Retourne None si le trajet n'a aucun leg ferroviaire (tout à pied).
+        `cards` : ids Trainline (config/trainline_cards.json) des cartes de
+        réduction à appliquer. La réduction d'une carte ne vaut que pour les
+        segments de sa région ; parmi plusieurs cartes, la plus avantageuse
+        s'applique. Retourne None si le trajet n'a aucun leg ferroviaire.
         """
         rail = [l for l in journey.legs if l.type != "walk"]
         if not rail:
@@ -159,11 +210,45 @@ class PricingEngine:
         else:
             total_eur = round(sum(self.fare(jl["km"], jl["region"]) for jl in legs), 2)
 
+        # Cartes de réduction : meilleure réduction par région, appliquée sur
+        # le billet global (mono-région) ou sur chaque billet de tronçon. Une
+        # carte n'est listée que si sa région d'application figure au trajet.
+        applied: list[dict] = []
+        pay_by_region: dict[str, float] = {}
+        for cid in cards or []:
+            card = trainline_cards.card_by_id(cid)
+            if card is None:
+                continue
+            info = self.card_info(card)
+            if info["pay"] is None or info["region"] not in regions:
+                continue
+            applied.append({
+                "id": cid, "name": card.get("name", cid),
+                "shortName": card.get("shortName", card.get("name", cid)),
+                "region": info["region"], "pay": info["pay"],
+            })
+            r = info["region"]
+            if r not in pay_by_region or info["pay"] < pay_by_region[r]:
+                pay_by_region[r] = info["pay"]
+
+        if rule == "mono_region":
+            pay = pay_by_region.get(legs[0]["region"])
+            price_reduced_eur = self._discount(total_eur, pay) if pay is not None else total_eur
+        else:
+            reduced = 0.0
+            for jl in legs:
+                fare = self.fare(jl["km"], jl["region"])
+                pay = pay_by_region.get(jl["region"])
+                reduced += self._discount(fare, pay) if pay is not None else fare
+            price_reduced_eur = round(reduced, 2)
+
         return {
             "rule": rule,
             "regions": sorted(regions),
             "km": round(total_km, 1),
             "legs": legs,
             "price_normal_eur": total_eur,
+            "price_reduced_eur": price_reduced_eur,
+            "cards": applied,
             "note": "prix estimés (modèle v1 calibré sur 3 prix observés Trainline, 12/08/2026)",
         }

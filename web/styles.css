@@ -112,6 +112,15 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
   font-size: 0.75rem; font-weight: 700; margin-left: 0.25rem; vertical-align: middle;
   background: #eef3ff; color: #27408c; cursor: help;
 }
+.price-chip s { color: #7d8cc0; font-weight: 600; }
+.price-reduced {
+  margin-top: 0.3rem; color: #166534; font-size: 0.9rem;
+}
+.price-card {
+  display: inline-block; margin-left: 0.3rem; padding: 0.05rem 0.4rem;
+  border-radius: 999px; background: #dcfce7; color: #166534;
+  font-size: 0.72rem; font-weight: 600;
+}
 .price-note {
   margin-top: 0.5rem; padding: 0.45rem 0.6rem; border-radius: 6px;
   background: #f0f4ff; border: 1px solid #b9c6e6; color: #27408c;

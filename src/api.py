@@ -355,10 +355,12 @@ def journeys(
     for j in journeys:
         jd = _bare_journey(j.to_json(d))
         # T12 — prix estimés (modèle v1, calibré sur prix observés) : le prix
-        # n'est jamais nul et reste une ESTIMATION clairement signalée.
-        price_info = _pricing.journey_price(j) if _pricing is not None else None
+        # n'est jamais nul et reste une ESTIMATION clairement signalée. Les
+        # cartes de réduction (param `cards`) réduisent `price_reduced_eur`.
+        price_info = _pricing.journey_price(j, cards=card_ids) if _pricing is not None else None
         if price_info is not None:
             jd["price_normal_eur"] = price_info.pop("price_normal_eur")
+            jd["price_reduced_eur"] = price_info.pop("price_reduced_eur")
             jd["pricing"] = price_info
         bookable = 0
         # T11 — leg ferroviaire de départ et d'arrivée (marches exclues), pour

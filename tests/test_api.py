@@ -187,6 +187,34 @@ class ApiTestCase(unittest.TestCase):
             self.assertIn("km", j["pricing"])
             self.assertTrue(j["pricing"]["legs"])
 
+    def test_journeys_prix_reduit_avec_carte(self):
+        """T12 — cards=… : price_reduced_eur baisse avec une carte de la région
+        du trajet (BFC solidaire, -75 %) et pricing.cards documente l'application."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={
+                "from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
+                "cards": self.BFC_SOLIDAIRE,
+            },
+        )
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        self.assertIn("price_reduced_eur", j)
+        self.assertLess(j["price_reduced_eur"], j["price_normal_eur"])
+        self.assertEqual(j["pricing"]["cards"][0]["id"], self.BFC_SOLIDAIRE)
+        # 20,00 € plein tarif × 0,25 -> 5,00 €
+        self.assertAlmostEqual(j["price_reduced_eur"], 5.0, delta=0.01)
+
+    def test_journeys_prix_reduit_egal_normal_sans_carte(self):
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        for j in r.json()["journeys"][:2]:
+            self.assertEqual(j["price_reduced_eur"], j["price_normal_eur"])
+            self.assertEqual(j["pricing"]["cards"], [])
+
     def test_journeys_count_et_max_transfers(self):
         r = self.client.get(
             "/v1/journeys",

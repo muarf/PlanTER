@@ -5,7 +5,8 @@ Exécution : .venv/bin/python -m unittest tests.test_pricing -v
 Valide sur le graphe réel :
 - la calibration reproduit les prix observés (41,00 € / 22,10 € / 20,30 €) ;
 - la règle mono/pluri-région s'applique (un billet vs somme des tronçons) ;
-- l'API expose price_normal_eur + métadonnées pricing sur /v1/journeys.
+- les cartes de réduction réduisent le tarif selon leur région d'application ;
+- l'API expose price_normal_eur / price_reduced_eur + métadonnées pricing.
 """
 import sys
 import unittest
@@ -19,6 +20,13 @@ from src.raptor import RaptorEngine
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 DATE = 20260810
+
+# Ids Trainline (config/trainline_cards.json).
+BFC_26 = "5be729fcfc26caa921c53f6d836175d832c288ca"
+BFC_SOLIDAIRE = "2a730e22c0be4cf0030f89205f540fe39e8dca6b"
+HDF = "7d76cf68a01468562cde7088753e8a4673fcda30"
+ZOU_ETUDES = "d55f73482d9d2d0f7ccc92b83a13cc0a9b1d788d"
+ABO_TEMPO = "8343c7a009b1f83bccd79d21150724227a19e3ad"
 
 
 class PricingTestCase(unittest.TestCase):
@@ -119,6 +127,89 @@ class PricingTestCase(unittest.TestCase):
             legs = []
 
         self.assertIsNone(self.pe.journey_price(FakeJourney()))
+
+    # ------------------------------------------------------- cartes réductions
+    def test_card_info_bfc(self):
+        # Carte BFC 26+ : -60% we / -30% semaine -> pay représentatif 0.40 ;
+        # carte solidaire BFC : -75% -> 0.25 (dérogation by_id).
+        info = self.pe.card_info({"id": BFC_26, "name": "Carte Bourgogne-Franche-Comté 26+"})
+        self.assertEqual(info["region"], "Bourgogne-Franche-Comté")
+        self.assertEqual(info["pay"], 0.4)
+        info_sol = self.pe.card_info({"id": BFC_SOLIDAIRE, "name": "Carte Bourgogne-Franche-Comté tarif réduit solidaire"})
+        self.assertEqual(info_sol["pay"], 0.25)
+
+    def test_card_info_abonnement_sans_reduction(self):
+        # Un abonnement n'a pas de réduction par billet unitaire.
+        info = self.pe.card_info({"id": ABO_TEMPO, "name": "Abonnement Normandie Tempo +26"})
+        self.assertIsNone(info["pay"])
+
+    def test_card_info_pass_etudes_sans_reduction(self):
+        # Pass ZOU! Études (trajets illimités) : pas de réduction par billet.
+        info = self.pe.card_info({"id": ZOU_ETUDES, "name": "Carte Région Sud (PACA) ZOU! Études"})
+        self.assertIsNone(info["pay"])
+        self.assertEqual(info["region"], "Provence-Alpes-Côte d'Azur")
+
+    def test_card_info_region_inconnue(self):
+        # Sans mot-clé de région, la carte n'est applicable nulle part.
+        info = self.pe.card_info({"id": "x" * 40, "name": "Pass Sûreté"})
+        self.assertIsNone(info["pay"])
+        self.assertEqual(info["region"], "INCONNUE")
+
+    def test_dijon_besancon_carte_bfc(self):
+        # Dijon -> Besançon : 20,00 € plein tarif ; solidaire BFC (-75%) -> 5,00 €.
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"),
+            7 * 60, 2, "train_only", None,
+        )
+        self.assertTrue(js)
+        info = self.pe.journey_price(js[0])
+        self.assertEqual(info["price_normal_eur"], 20.0)
+        red = self.pe.journey_price(js[0], cards=[BFC_SOLIDAIRE])
+        self.assertEqual(red["price_reduced_eur"], 5.0)
+        self.assertEqual([c["shortName"] for c in red["cards"]], ["Tarif réduit solidaire"])
+
+    def test_meilleure_carte_gagne(self):
+        # Parmi deux cartes BFC, la plus avantageuse s'applique (solidaire < 26+).
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"),
+            7 * 60, 2, "train_only", None,
+        )
+        red = self.pe.journey_price(js[0], cards=[BFC_26, BFC_SOLIDAIRE])
+        self.assertEqual(red["price_reduced_eur"], 5.0)
+
+    def test_carte_hors_region_sans_effet(self):
+        # Une carte HdF ne réduit pas un trajet bourguignon.
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"),
+            7 * 60, 2, "train_only", None,
+        )
+        red = self.pe.journey_price(js[0], cards=[HDF])
+        self.assertEqual(red["price_reduced_eur"], red["price_normal_eur"])
+        self.assertEqual(red["cards"], [])
+
+    def test_pluri_region_carte_reduit_son_troncon_seulement(self):
+        # Lille -> Rouen (HdF + Normandie) avec Ma Carte TER HdF : le tronçon
+        # haut-de-français est divisé par 2, le tronçon normand reste plein tarif.
+        js = self.e.depart_after_wide(
+            DATE, self.resolve("Lille Flandres") or self.resolve("Lille"), self.resolve("Rouen Rive-Droite"),
+            7 * 60, 4, "train_only", None,
+        )
+        found = None
+        for j in js:
+            info = self.pe.journey_price(j, cards=[HDF])
+            if info and info["rule"] == "pluri_region" and len(info["cards"]) == 1:
+                found = (info, j)
+                break
+        self.assertIsNotNone(found, "aucun trajet pluri-région Lille->Rouen réductible")
+        info, j = found
+        base = self.pe.journey_price(j)
+        self.assertLess(info["price_reduced_eur"], base["price_normal_eur"])
+        # le tronçon normand reste au plein tarif : la réduction ne porte que
+        # sur le tronçon haut-de-français (pay 0.50).
+        hdf_km = next(l["km"] for l in base["legs"] if l["region"] == "Hauts-de-France")
+        norm_km = next(l["km"] for l in base["legs"] if l["region"] == "Normandie")
+        expected = round(round(self.pe.fare(hdf_km, "Hauts-de-France") * 0.5 / 0.05) * 0.05, 2) + self.pe.fare(norm_km, "Normandie")
+        self.assertAlmostEqual(info["price_reduced_eur"], round(expected, 2), delta=0.01)
 
 
 if __name__ == "__main__":

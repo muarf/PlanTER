@@ -702,13 +702,14 @@ pied de page. Mobile-first + aria (autocomplete, alerts).
 **Critères d'acceptation :**
 - Paris-Besançon est estimé à 41,00 €. ✅ (calibré : 41,00 € à 405 km en BFC)
 - Lille-Rouen via Amiens est estimé à 43,00 €. ⚠️ (≈ 42-50 € selon les tronçons trouvés)
-- Les cartes de réduction modifient correctement le prix selon les règles régionales. ❌ (pas encore : `price_reduced_eur` à venir)
+- Les cartes de réduction modifient correctement le prix selon les règles régionales. ✅ MVP (13/08/2026) : `price_reduced_eur` par carte, taux représentatifs par région à valider.
 
 **Limites du modèle v1 (à documenter et affiner) :**
 - Calibré sur 3 prix observés Trainline (12/08/2026) ; courbe unique `a·√km + b·km` + échelle par région.
 - Distance = haversine × 1,17 le long des arrêts (approximation de la longueur de voie).
 - Région d'un train = région majoritaire de ses arrêts (inconnues : gares frontalières, 917/3462).
 - Certains prix courts/moyens sont surévalués (ex. Dijon-Besançon ≈ 20 € estimé vs ≈ 12 € réel).
+- Réductions par carte : un taux REPRÉSENTATIF par carte (les barèmes réels varient semaine/week-end, heures et selon les ressources — cf. barèmes publics : BFC Mobigo+ 30/60 %, illico LIBERTÉ 25/50 %, ZOU! Malin -30 %, solidaire 50/75/90 % selon région). Abonnements/pass sans réduction par billet. À affiner par observations.
 
 **Dépendances :** T5, T6, T8.
 

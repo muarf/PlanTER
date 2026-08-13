@@ -38,3 +38,75 @@ regions:
     scale: 1.0425        # 112 km -> 22,10 €
   Normandie:
     scale: 0.9575        # 112 km -> 20,30 €
+
+# T12 — Cartes de réduction TER (ESTIMATION v1).
+#
+# Pour chaque carte de config/trainline_cards.json, le moteur calcule la
+# fraction du plein tarif PAYÉE (`pay`, 0.50 = -50 %) et la région où la carte
+# s'applique. La réduction ne s'applique QUE sur les segments de la région de
+# la carte (une carte HdF ne réduit pas un trajet normand).
+#
+# Les barèmes réels variant par région, période et heure (ex. week-end/semaine),
+# on retient une valeur REPRÉSENTATIVE documentée entre parenthèses. Ces taux
+# sont des ESTIMATIONS à valider, comme le prix plein.
+cards:
+  # Carte de réduction régionale non répertoriée : -50 % (défaut prudent).
+  default_pay: 0.50
+
+  # Abonnements / passes / forfaits : pas de réduction par billet unitaire
+  # (ils couvrent des voyages illimités ou à tarif fixe).
+  no_discount_prefixes: [abonnement, pass, forfait, sûreté]
+
+  # Motifs (substring du nom, insensible à la casse) — le PREMIER trouvé gagne.
+  pay_patterns:
+    - {contains: "mobi 75",      pay: 0.25}   # PDL mobi 75% : -75 % (QF < 434)
+    - {contains: "solidaire +",  pay: 0.10}   # ZOU! Solidaire + : -90 %
+    - {contains: "solidaire",    pay: 0.50}   # cartes solidaires : -50 % (BFC solidaire -75 % via by_id)
+    - {contains: "malin",        pay: 0.70}   # ZOU! Malin : -30 %
+    - {contains: "75%",          pay: 0.25}
+    - {contains: "50%",          pay: 0.50}
+    - {contains: "-26",          pay: 0.50}   # cartes jeunes / Tempo Paris -26
+    - {contains: "jeune",        pay: 0.50}
+    - {contains: "sénior",       pay: 0.50}
+    - {contains: "senior",       pay: 0.50}
+    - {contains: "études",       pay: 0.50}
+    - {contains: "26+",          pay: 0.40}   # BFC Mobigo+ : 60 % we / 30 % semaine
+    - {contains: "fluo",         pay: 0.50}   # Grand Est Fluo (et Fluo Jeune) : -50 %
+    - {contains: "tempo",        pay: 0.40}   # Normandie Tempo : 50 % we / 25 % semaine
+    - {contains: "mezzo",        pay: 0.50}   # PDL mezzo / mezzo-26 : -50 %
+    - {contains: "liberto",      pay: 0.40}   # Occitanie LibertiO' : 50 % we / 30 % semaine
+    - {contains: "illico mobilité", pay: 0.50}  # ARA illico MOBILITÉ (solidaire) : -50 %
+    - {contains: "illico liberté", pay: 0.40}   # ARA illico LIBERTÉ : 50 % we / 25 % semaine
+    - {contains: "rémi",         pay: 0.50}   # Centre-Val de Loire Rémi (Liberté/Jeune/Sénior/Plus)
+    - {contains: "carte +",      pay: 0.50}   # Nouvelle-Aquitaine Carte + : -50 %
+    - {contains: "zou",          pay: 0.70}   # ZOU! : -30 % (jeunes/solidaire déjà matchés avant)
+
+  # Dérogations explicites par id Trainline (les motifs ne suffisent pas).
+  by_id:
+    "d55f73482d9d2d0f7ccc92b83a13cc0a9b1d788d":   # Carte Région Sud ZOU! Études (pass, trajets illimités)
+      type: none
+    "b7d4997c6167068b9e04c96482c0479aeabb86a6":   # Pass ZOU! Études
+      type: none
+    "2a730e22c0be4cf0030f89205f540fe39e8dca6b":   # BFC tarif réduit solidaire : -75 %
+      pay: 0.25
+    "9af6d24373bf3ceb196aa654156dae36ac5ca1aa":   # Grand Est Solidaire : -50 %
+      pay: 0.50
+    "1624b700646c683164a031f0209cc1f8752a396a":   # Nouvelle-Aquitaine Solidaire : -50 %
+      pay: 0.50
+
+  # Région d'application d'une carte, déduite de son nom.
+  region_keywords:
+    - {contains: "bourgogne",        region: "Bourgogne-Franche-Comté"}
+    - {contains: "hauts-de-france",  region: "Hauts-de-France"}
+    - {contains: "normandie",        region: "Normandie"}
+    - {contains: "pays de la loire", region: "Pays de la Loire"}
+    - {contains: "auvergne",         region: "Auvergne-Rhône-Alpes"}
+    - {contains: "rhône-alpes",      region: "Auvergne-Rhône-Alpes"}
+    - {contains: "occitanie",        region: "Occitanie"}
+    - {contains: "grand",            region: "Grand Est"}
+    - {contains: "région sud",       region: "Provence-Alpes-Côte d'Azur"}
+    - {contains: "paca",             region: "Provence-Alpes-Côte d'Azur"}
+    - {contains: "centre-val",       region: "Centre-Val de Loire"}
+    - {contains: "bretagne",         region: "Bretagne"}
+    - {contains: "breizhgo",         region: "Bretagne"}
+    - {contains: "nouvelle-aquitaine", region: "Nouvelle-Aquitaine"}

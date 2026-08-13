@@ -96,6 +96,22 @@ function setupAutocomplete(inputEl, listEl) {
 setupAutocomplete(fromInput, $("#from-suggestions"));
 setupAutocomplete(toInput, $("#to-suggestions"));
 
+/* T12 — cartes de réduction TER : sélecteur alimenté par /v1/cards. La carte
+   choisie est envoyée en `cards=` : l'API renvoie alors price_reduced_eur. */
+const cardSelect = $("#card");
+fetch(API_BASE + "/v1/cards")
+  .then((r) => (r.ok ? r.json() : Promise.reject()))
+  .then((body) => {
+    body.cards.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = c.shortName || c.name;
+      opt.title = c.name;
+      cardSelect.appendChild(opt);
+    });
+  })
+  .catch(() => {});
+
 /* ------------------------------------------------------------------ résultats */
 function fmtTime(iso) {
   const d = new Date(iso);
@@ -183,6 +199,9 @@ function fmtPrice(eur) {
 function priceChip(j) {
   if (j.price_normal_eur == null) return "";
   const title = (j.pricing && j.pricing.note) || "prix estimé";
+  if (j.price_reduced_eur != null && j.price_reduced_eur < j.price_normal_eur) {
+    return ` <span class="price-chip" title="${title}">≈ <s>${fmtPrice(j.price_normal_eur)}</s> ${fmtPrice(j.price_reduced_eur)}</span>`;
+  }
   return ` <span class="price-chip" title="${title}">≈ ${fmtPrice(j.price_normal_eur)}</span>`;
 }
 
@@ -195,8 +214,15 @@ function priceBlock(j) {
   const rule = j.pricing.rule === "mono_region"
     ? "un seul billet dégressif sur la distance totale"
     : "un billet par tronçon, sommé";
+  const cards = (j.pricing.cards || [])
+    .map((c) => `<span class="price-card">${c.shortName} (−${Math.round((1 - c.pay) * 100)} %)</span>`)
+    .join("");
+  const reduced = (j.price_reduced_eur != null && j.price_reduced_eur < j.price_normal_eur)
+    ? `<div class="price-reduced">Tarif réduit : ≈ <strong>${fmtPrice(j.price_reduced_eur)}</strong> ${cards}</div>`
+    : "";
   return `<div class="price-note">
     <strong>Prix estimé : ≈ ${fmtPrice(j.price_normal_eur)}</strong>
+    ${reduced}
     <div class="price-detail">${rows}<div class="price-rule">Règle : ${rule}.</div>
     <small>${j.pricing.note}.</small></div>
   </div>`;
@@ -291,6 +317,7 @@ async function search(timeShiftMin = 0) {
     sort: sortBy,
     count: sortBy === "duration" ? "10" : "5",
   });
+  if (cardSelect.value) params.set("cards", cardSelect.value);
 
   try {
     const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);

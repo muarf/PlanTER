@@ -991,3 +991,54 @@ mono-région (un billet unique), et la somme des billets par tronçon sinon
 calibrer (3 prix), distance approximative, prix courts surévalués, cartes de
 réduction non appliquées (`price_reduced_eur` à venir), gares frontalières
 sans région.
+## 29. T12 — Cartes de réduction : price_reduced_eur (13/08/2026)
+
+**Contexte.** Le lien Trainline ne peut pas appliquer les cartes de réduction
+(§25 : `cardIds` non transmis, storage cross-origin inaccessible). Le moteur
+interne de T12 s'en charge : il calcule lui-même le tarif réduit.
+
+**Modèle (`config/pricing.yaml`, section `cards`).** Chaque carte TER de
+`config/trainline_cards.json` (46 cartes) se voit attribuer :
+- `pay` = fraction du plein tarif PAYÉE (0.50 = -50 %) — taux REPRÉSENTATIF
+  car les barèmes réels varient (semaine vs week-end, heures, ressources) ;
+- une région d'application déduite du nom (keywords) ;
+- `no_discount_prefixes` (abonnement/pass/forfait/sûreté) : pas de réduction
+  par billet unitaire (voyages illimités ou tarif fixe) ;
+- motifs par ordre de priorité + dérogations `by_id`.
+
+**Barèmes publics utilisés (recherches 13/08/2026) :**
+- BFC « TRAIN Mobigo+ » 26+ : 60 % we / 30 % semaine → 0,40 ; Jeune -26 : 50 % ;
+  solidaire : 75 % → 0,25 ;
+- Hauts-de-France Ma Carte TER / -26 : 50 % → 0,50 ;
+- PDL mezzo/mezzo-26 : 50 % ; mobi 50 % → 0,50 ; mobi 75 % → 0,25 ;
+- ARA illico LIBERTÉ : 25 % sem / 50 % we → 0,40 ; illico JEUNES/MOBILITÉ : 0,50 ;
+- Occitanie LibertiO' : 50 % we / 30 % sem → 0,40 ;
+- Grand Est Fluo / Fluo Jeune : 50 % ;
+- Région Sud : ZOU! Malin -30 % (0,70), Solidaire -50 % (0,50), Solidaire + -90 % (0,10) ;
+- Normandie Tempo : 25 % sem / 50 % we → 0,40 ;
+- Nouvelle-Aquitaine Carte + : 50 % ; Centre-Val Rémi : 50 %.
+
+**Règle d'application.** Une carte ne réduit QUE les segments de sa région :
+- mono-région : réduction sur le billet global dégressif ;
+- pluri-région : réduction du billet de tronçon de sa région, les autres
+  tronçons restent au plein tarif ;
+- plusieurs cartes : la plus avantageuse par région (min de `pay`) ;
+- carte hors région du trajet : sans effet (non listée dans `pricing.cards`).
+
+**API.** `/v1/journeys?cards=id,…` (ids validés par `trainline_cards.valid_ids`)
+expose `price_reduced_eur` (== `price_normal_eur` sans carte) et
+`pricing.cards` (id, name, shortName, region, pay des cartes appliquées).
+
+**Web.** Sélecteur de carte de réduction (`<select>` alimenté par `/v1/cards`)
+réintégré dans le formulaire ; chip de résultat barrant le plein tarif quand la
+réduction s'applique ; bloc détail avec tarif réduit et cartes appliquées.
+
+**Vérifs (graphe réel) :**
+- Dijon → Besançon Viotte : 20,00 € plein tarif ; carte solidaire BFC (-75 %)
+  → 5,00 € ; avec 26+ (0,40) → 8,00 € ; les deux → 5,00 € ;
+- Lille → Rouen via Amiens : 45,25 € ; Ma Carte TER HdF → 33,20 € (seul le
+  tronçon HdF passe à 50 %, le tronçon normand reste plein tarif).
+
+**Limites :** taux représentatifs (pas la grille semaine/week-end réelle), pas
+de gestion de l'âge ni des accompagnants, cartes nationales (Avantage/Liberté)
+non couvertes (la liste est `sncf_regional`), 100 tests OK.
