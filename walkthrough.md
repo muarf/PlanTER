@@ -1042,3 +1042,45 @@ réduction s'applique ; bloc détail avec tarif réduit et cartes appliquées.
 **Limites :** taux représentatifs (pas la grille semaine/week-end réelle), pas
 de gestion de l'âge ni des accompagnants, cartes nationales (Avantage/Liberté)
 non couvertes (la liste est `sncf_regional`), 100 tests OK.
+
+## 30. T12 — Web : page « comment obtenir chaque carte de réduction TER » (13/08/2026)
+
+**Contexte.** Les cartes de réduction TER (base `config/trainline_cards.json`,
+46 cartes) ne servaient pas encore à lutilisateur final : le champ web avait
+
+## 30. T12 — Web : page « comment obtenir chaque carte de réduction TER » (13/08/2026)
+
+**Contexte.** Les cartes de réduction TER (base `config/trainline_cards.json`,
+46 cartes) ne servaient pas encore à l'utilisateur final : le champ web avait
+été retiré du formulaire (§25) car Trainline n'applique pas la carte via
+l'URL. La page `web/cards.html` rend ces cartes consultables : prix,
+réduction, conditions, démarche et lien officiel.
+
+**Page (`web/cards.html`).**
+- Menu de navigation par région (11 régions : ARA, BFC, Bretagne, Centre-Val
+  de Loire, Grand Est, Hauts-de-France, Normandie, Nouvelle-Aquitaine,
+  Occitanie, Pays de la Loire, PACA/Région Sud).
+- 54 cartes/offres réparties par région (les 46 cartes du fichier
+  `trainline_cards.json` + offres régionales type packs/pass), chacune avec
+  « Prix », « Réduction », « Conditions », « Démarche » et « Lien » (site
+  officiel du réseau).
+- Sélecteur multi-régions (filtre des cartes affichées).
+
+**Cartes ajoutées le 13/08/2026 (vérifiées sur la beta betater.zvz.fr) :**
+- Hauts-de-France : Pack TER Chantilly (27 €/adulte, AR TER + entrée 1 jour
+  au Domaine de Chantilly) ;
+- Occitanie : Compte mobilité liO `+=0` (12-26 ans), `+=Flex` (27-59 ans),
+  `+=-` (60 ans et +) — dégressivité −10 % à −90 % selon le nombre de trajets,
+  plafonds 97 €/mois en train et 44 €/mois en car, gratuit (Fairtiq) ;
+- Pays de la Loire : Forfait multi (35 € 1 jour / 50 € 2 jours, 1-5 pers.) ;
+- Région Sud : Pass train ZOU! (journée 20-30 €, régional 60 €/3 j ou
+  100 €/7 j, +5 €/accompagnant).
+
+**Vérification beta (13/08/2026).** Parcours de toutes les cartes régionales
+sur https://betater.zvz.fr/cards.html : 11 sections régionales affichées,
+liens officiels corrects, nouvelles cartes présentes. Le service beta
+(`ter-finder-pricing.service`, port 8001) sert la branche `pricing`.
+
+**Mise à jour prod.** `web/cards.html` est servi statiquement ; prod
+(`ter-finder.service`, port 8000, ter.zvz.fr) est mise à jour par `git pull`
+puis redémarrage du service.
