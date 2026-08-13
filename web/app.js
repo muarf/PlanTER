@@ -489,7 +489,10 @@ prioritizeFewerTransfersCheckbox.addEventListener("change", (e) => {
     sortBy = "departure";
   }
   setSortButtons();
-  search();
+  // Relancer la recherche uniquement si la section des résultats est visible
+  if (!resultsSection.hasAttribute("hidden")) {
+    search();
+  }
 });
 
 form.addEventListener("submit", (e) => {

@@ -62,6 +62,12 @@
             <ul id="cards-panel" class="cards-panel" role="menu" aria-labelledby="cards-label" hidden></ul>
           </div>
         </div>
+        <div class="field" style="grid-column: 1 / -1; margin-top: 0.25rem;">
+          <label class="checkbox">
+            <input type="checkbox" id="prioritize-fewer-transfers">
+            <span>Prioriser les moins de correspondances (favorise les trajets avec moins de changements)</span>
+          </label>
+        </div>
         <button type="submit" id="search-button">Rechercher</button>
       </form>
       <p id="search-error" class="error" role="alert" hidden></p>
@@ -73,12 +79,6 @@
         <span class="sort-label">Trier par :</span>
         <button type="button" class="sort-button" id="sort-departure">Départ</button>
         <button type="button" class="sort-button" id="sort-duration">Le plus court</button>
-      </div>
-      <div class="prioritize-row">
-        <label>
-          <input type="checkbox" id="prioritize-fewer-transfers">
-          <span>Prioriser les moins de correspondances</span>
-        </label>
       </div>
       <ol id="journeys" class="journeys"></ol>
       <p id="no-results" class="info" hidden>Aucun trajet 100% TER trouvé pour ces critères.</p>

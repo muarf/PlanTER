@@ -1492,3 +1492,17 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
 **Validation.**
 - Page accessible localement et sur le serveur de démonstration. Le style visuel s'intègre harmonieusement avec la charte graphique existante.
 
+## 40. T8bis — Déplacement de la case Prioriser les moins de correspondances (13/08/2026)
+
+**Contexte.** La case à cocher "Prioriser les moins de correspondances" influait directement sur les paramètres de recherche de l'API. Cependant, elle n'était affichée que dans les résultats de recherche (qui sont masqués par défaut). L'option a été déplacée dans le formulaire de recherche principal pour permettre de la sélectionner dès le départ.
+
+**Modifications.**
+- **HTML** : Déplacement de la case à cocher `#prioritize-fewer-transfers` depuis la section `#results` vers le formulaire `#search-form` (avec un affichage pleine largeur et un libellé plus explicite).
+- **JavaScript** : Ajustement de l'écouteur `change` dans `web/app.js` pour ne déclencher automatiquement la recherche que si les résultats sont déjà affichés sur la page.
+- **PWA Cache** : Incrémentation de la version du cache (`ter-finder-v7`) dans `web/sw.js` et ajout de `/about.html` aux ressources du shell.
+
+**Validation.**
+- L'interface affiche la case dès le premier chargement.
+- La sélection de la case modifie dynamiquement le tri si des résultats sont visibles, ou est simplement conservée pour la première recherche dans le cas contraire.
+- Les tests unitaires et d'intégration passent tous avec succès (43/43 tests OK).
+

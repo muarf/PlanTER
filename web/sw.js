@@ -1,13 +1,14 @@
 /* planTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v6";
+const CACHE = "ter-finder-v7";
 const SHELL = [
   "/",
   "/styles.css",
   "/app.js",
   "/cards.html",
   "/privacy.html",
+  "/about.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png"
@@ -96,7 +97,8 @@ self.addEventListener("fetch", (event) => {
   /* Assets du shell : cache-first. */
   if (url.pathname.startsWith("/styles.css") || url.pathname.startsWith("/app.js") ||
       url.pathname.startsWith("/icon-") || url.pathname === "/manifest.webmanifest" ||
-      url.pathname === "/cards.html" || url.pathname === "/privacy.html") {
+      url.pathname === "/cards.html" || url.pathname === "/privacy.html" ||
+      url.pathname === "/about.html") {
     event.respondWith(networkFirst(req, CACHE));
   }
 });
