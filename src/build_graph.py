@@ -42,6 +42,7 @@ from src.graph import (  # noqa: E402
     normalize,
 )
 from src.gtfs import extract_mode_from_stop_id, read_zip_file  # noqa: E402
+from src.rfn import RfnIndex, uic_from_stop_id  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = ROOT / "data" / "ter" / "gtfs_ter.zip"
@@ -74,7 +75,100 @@ def parse_mini_yaml(path: Path) -> dict[str, str]:
     return result
 
 
-def _build_graph(zip_path: Path, interchange: dict[str, str], links: dict[str, str]) -> Graph:
+def _merge_extra_feed(graph: Graph, zip_path: Path) -> None:
+    """Fusionne un GTFS complémentaire dans le graphe déjà rempli.
+
+    Le feed national SNCF ne contient pas les trains ZOU! Transdev RSI
+    (directs Marseille <-> Nice). Ce feed utilise des stop_id = UIC nus
+    (87751008) et des trips datés (17481@2026-08-10). On aligne chaque UIC
+    sur la StopArea existante `StopArea:OCE<uic>` ; les trips dont un arrêt
+    est inconnu sont ignorés.
+    """
+    with zipfile.ZipFile(zip_path) as zf:
+        _, routes_rows = read_zip_file(zf, "routes.txt")
+        _, trips_rows = read_zip_file(zf, "trips.txt")
+        _, stop_times = read_zip_file(zf, "stop_times.txt")
+        _, cdates = read_zip_file(zf, "calendar_dates.txt")
+
+    # --- Routes (dédup sur route_id) ------------------------------------
+    for r in routes_rows:
+        rid = r["route_id"]
+        if rid in graph.route_index:
+            continue
+        graph.route_index[rid] = len(graph.routes)
+        graph.routes.append(
+            Route(id=rid, short_name=r.get("route_short_name", ""), long_name=r.get("route_long_name", ""))
+        )
+
+    # --- Circulation (service_id -> dates) ------------------------------
+    # Même schéma que le feed principal : chaque service pointe des dates.
+    for c in cdates:
+        dates = set(graph.service_dates.get(c["service_id"], ()))
+        dates.add(int(c["date"]))
+        graph.service_dates[c["service_id"]] = frozenset(dates)
+    for svc, dates in graph.service_dates.items():
+        if dates:
+            if graph.date_min == 0 or min(dates) < graph.date_min:
+                graph.date_min = min(dates)
+            if max(dates) > graph.date_max:
+                graph.date_max = max(dates)
+
+    # --- Trips + StopTimes (alignés sur les StopArea existantes) ---------
+    st_by_trip: dict[str, list[dict]] = defaultdict(list)
+    for s in stop_times:
+        st_by_trip[s["trip_id"]].append(s)
+
+    skipped = 0
+    added = 0
+    for t in trips_rows:
+        tid = t["trip_id"]
+        rows = st_by_trip.get(tid)
+        if not rows:
+            continue
+        rows.sort(key=lambda r: int(r["stop_sequence"]))
+        trip = Trip(
+            id=tid,
+            route=graph.route_index.get(t["route_id"], -1),
+            service_id=t["service_id"],
+            vehicle="train",
+        )
+        if trip.route == -1:
+            skipped += 1
+            continue
+        ok = True
+        for r in rows:
+            uic = r["stop_id"]
+            area_id = f"StopArea:OCE{uic}"
+            area_idx = graph.stop_index.get(area_id)
+            if area_idx is None:
+                area_idx = graph.stop_index.get(uic)
+            if area_idx is None:
+                skipped += 1
+                ok = False
+                break
+            trip.stop_times.append(
+                StopTime(
+                    stop=area_idx,
+                    arr=_hhmm_to_min(r["arrival_time"]),
+                    dep=_hhmm_to_min(r["departure_time"]),
+                )
+            )
+        if not ok or not trip.stop_times:
+            continue
+        graph.trips.append(trip)
+        added += 1
+
+    if skipped:
+        print(f"[build] ⚠ extra {zip_path.name} : {skipped} stop_times/trips ignorés (arrêt inconnu).", file=sys.stderr)
+    print(f"[build] extra {zip_path.name} : {added} trips, {len(routes_rows)} ligne(s).", file=sys.stderr)
+
+
+def _build_graph(
+    zip_path: Path,
+    extra_zips: list[Path],
+    interchange: dict[str, str],
+    links: dict[str, str],
+) -> Graph:
     with zipfile.ZipFile(zip_path) as zf:
         _, stops = read_zip_file(zf, "stops.txt")
         _, routes_rows = read_zip_file(zf, "routes.txt")
@@ -210,6 +304,15 @@ def _build_graph(zip_path: Path, interchange: dict[str, str], links: dict[str, s
     if skipped:
         print(f"[build] ⚠ {skipped} stop_times/trips ignorés (arrêt inconnu).", file=sys.stderr)
 
+    # --- Feeds complémentaires (ex. TRSI Transdev, UIC nus) ---------------
+    # Le GTFS national SNCF ne couvre pas les trains ZOU! Transdev
+    # (Marseille <-> Nice direct, ex. 17481). On fusionne ici les feeds
+    # supplémentaires : leurs stop_id sont des UIC nus (87751008) à aligner
+    # sur les StopArea existantes (StopArea:OCE87751008), sinon le trip est
+    # ignoré. Les trips sont des instances datées (17481@2026-08-10).
+    for extra in extra_zips:
+        _merge_extra_feed(graph, extra)
+
     # --- Index de routage -----------------------------------------------
     n_stops = len(graph.stops)
     graph.trips_by_route = [[] for _ in graph.routes]
@@ -228,6 +331,28 @@ def _build_graph(zip_path: Path, interchange: dict[str, str], links: dict[str, s
         route_trips.sort(key=lambda i: graph.trips[i].dep)
 
     graph.routes_by_stop = [sorted(set(routes)) for routes in graph.routes_by_stop]
+
+    # --- Distances PK par hop (rfn.py) ------------------------------------
+    # Précalcul : pour chaque paire d'arrêts consécutifs d'un trip, distance
+    # ferroviaire le long du réseau (RfnIndex.hop_km) stockée dans
+    # Graph.hop_km[(trip_idx, k)]. Les hops sans ancres PK (gares étrangères,
+    # etc.) restent absents : pricing.py retombe sur haversine × rail_factor.
+    t0_rfn = time.perf_counter()
+    rfn = RfnIndex()
+    uic_by_stop: list[str | None] = [uic_from_stop_id(st.id) for st in graph.stops]
+    total_hops = sum(len(t.stop_times) - 1 for t in graph.trips)
+    n_pk = 0
+    for tidx, trip in enumerate(graph.trips):
+        sts = trip.stop_times
+        for k in range(len(sts) - 1):
+            d = rfn.hop_km(uic_by_stop[sts[k].stop], uic_by_stop[sts[k + 1].stop])
+            if d is not None:
+                graph.hop_km[(tidx, k)] = d
+                n_pk += 1
+    print(
+        f"[build] hop_km PK : {n_pk}/{total_hops} hops couverts "
+        f"({100 * n_pk / total_hops:.1f} %) en {time.perf_counter() - t0_rfn:.1f} s"
+    )
 
     # --- Temps de correspondance par gare --------------------------------
     default = int(interchange.pop("default", str(DEFAULT_MIN_TRANSFER_MIN)))
@@ -328,6 +453,8 @@ def verify(graph: Graph, date: int) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Builder de graphe GTFS-TER (T2)")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--extra-input", type=Path, action="append", default=[],
+                        help="GTFS complémentaire à fusionner (ex. TRSI Transdev). Répétable.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--interchange", type=Path, default=DEFAULT_INTERCHANGE)
     parser.add_argument("--paris-links", type=Path, default=DEFAULT_PARIS_LINKS)
@@ -344,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.perf_counter()
     print(f"[build] input  : {args.input}")
-    graph = _build_graph(args.input, interchange, links)
+    graph = _build_graph(args.input, args.extra_input, interchange, links)
     print(
         f"[build] graphe : {len(graph.stops)} gares, {len(graph.routes)} lignes, "
         f"{len(graph.trips)} trips, {graph.date_min}-{graph.date_max}"

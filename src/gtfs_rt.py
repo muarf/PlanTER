@@ -50,7 +50,8 @@ HTTP_TIMEOUT_S = 30
 # « StopPoint:OCETrain TER-87723197 » -> « 87723197 »
 _STOPPOINT_RE = re.compile(r"(\d{8})$")
 # numéro de train d'un trip_id (graphe et flux Service Alerts) : OCESN117760F…
-_TRAIN_NO_RE = re.compile(r"OCES(N?\d+)F")
+# ou TRSI (Transdev) : 17481@2026-08-10
+_TRAIN_NO_RE = re.compile(r"OCES(N?\d+)F|^(\d+)@")
 
 _MAX_ALERT_LEN = 200  # description tronquée exposée (titre complet conservé)
 
@@ -315,7 +316,7 @@ def parse_service_alerts(payload: bytes, graph: Graph) -> RealtimeAlerts:
             elif ie.trip.trip_id:
                 m = _TRAIN_NO_RE.match(ie.trip.trip_id)
                 if m:
-                    alert.train_numbers.add(m.group(1))
+                    alert.train_numbers.add(m.group(1) or m.group(2))
                     seen_general = False
         alert.general = seen_general
         feed.alerts.append(alert)

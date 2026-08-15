@@ -110,12 +110,14 @@ class Journey:
         }
 
 
-_VEHICLE_LABEL_RE = re.compile(r"OCES(N?\d+)F")
+_VEHICLE_LABEL_RE = re.compile(r"OCES(N?\d+)F|^(\d+)@")
 
 
 def _vehicle_label(trip_id: str) -> str:
     m = _VEHICLE_LABEL_RE.search(trip_id)
-    return m.group(1) if m else ""
+    if not m:
+        return ""
+    return m.group(1) or m.group(2)
 
 
 # ---------------------------------------------------------------- engine

@@ -46,19 +46,81 @@ class PricingTestCase(unittest.TestCase):
         self.assertEqual(self.pe.fare(405, "Bourgogne-Franche-Comté"), 41.0)
 
     def test_fare_ancre_hdf(self):
-        self.assertEqual(self.pe.fare(112, "Hauts-de-France"), 22.1)
+        # 112 km (bande 110-149) : 4,506 + 0,1572×112 = 22,11 → ×1,0425 = 23,05 -> 23,10 €.
+        self.assertEqual(self.pe.fare(112, "Hauts-de-France"), 23.1)
 
     def test_fare_ancre_normandie(self):
-        self.assertEqual(self.pe.fare(112, "Normandie"), 20.3)
+        # Grille CGV Nomad 30/03/2026 : 112 km -> bande 101-125 = 22,00 €.
+        self.assertEqual(self.pe.fare(112, "Normandie"), 22.0)
+        # Bornes de paliers : 25 km -> 8,80 ; 26 km -> 8,80 ; 51 km -> 13,20.
+        self.assertEqual(self.pe.fare(25, "Normandie"), 4.4)
+        self.assertEqual(self.pe.fare(26, "Normandie"), 8.8)
+        self.assertEqual(self.pe.fare(50, "Normandie"), 8.8)
+        self.assertEqual(self.pe.fare(51, "Normandie"), 13.2)
+        # 131 km -> bande 126-150 = 26,40 € (Caen-Cherbourg).
+        self.assertEqual(self.pe.fare(131.4, "Normandie"), 26.4)
 
     def test_fare_plancher_et_arrondi(self):
-        self.assertGreaterEqual(self.pe.fare(1, "Occitanie"), 3.0)
-        self.assertEqual(self.pe.fare(1, "Occitanie"), 3.0)
+        # région sans règle -> formule de repli, plancher min_eur (3,00 €).
+        self.assertGreaterEqual(self.pe.fare(1, "INCONNUE"), 3.0)
+        self.assertEqual(self.pe.fare(1, "INCONNUE"), 3.0)
+
+    # ------------------------------------------------- règles régionales
+    def test_fare_escalier_bfc(self):
+        # Mobigo (validé 14/08, 6 points à 0,00 €) : 6/13/19/31 €.
+        self.assertEqual(self.pe.fare(23, "Bourgogne-Franche-Comté"), 6.0)
+        self.assertEqual(self.pe.fare(46, "Bourgogne-Franche-Comté"), 13.0)
+        self.assertEqual(self.pe.fare(93, "Bourgogne-Franche-Comté"), 19.0)
+        self.assertEqual(self.pe.fare(159, "Bourgogne-Franche-Comté"), 31.0)
+
+    def test_fare_escalier_cvl(self):
+        # Rémi : escalier 3,40/6,80/10,30/13,70/17,10/20,50/24,00.
+        self.assertEqual(self.pe.fare(59, "Centre-Val de Loire"), 13.7)
+        self.assertEqual(self.pe.fare(96, "Centre-Val de Loire"), 20.5)
+        self.assertEqual(self.pe.fare(115, "Centre-Val de Loire"), 24.0)
+
+    def test_fare_escalier_bretagne(self):
+        self.assertEqual(self.pe.fare(60, "Bretagne"), 12.0)
+        self.assertEqual(self.pe.fare(101, "Bretagne"), 17.0)
+        self.assertEqual(self.pe.fare(240, "Bretagne"), 30.0)
+
+    def test_fare_affine_paca(self):
+        # ZOU! : bande 65-109 -> 4,939 + 0,1741×66,9 = 16,59 -> 16,60 €.
+        self.assertEqual(self.pe.fare(66.9, "Provence-Alpes-Côte d'Azur"), 16.6)
+        self.assertEqual(self.pe.fare(15.9, "Provence-Alpes-Côte d'Azur"), 6.1)
+
+    def test_fare_affine_grand_est(self):
+        # Barème CGV V38 (01/01/2026) : 3,605 + 0,1859×87,7 = 19,91 -> 20,00 €.
+        self.assertEqual(self.pe.fare(87.7, "Grand Est"), 20.0)
+        # palier fixe 1-10 km = 3,20 € ; bande 1-11 semi-ouverte.
+        self.assertEqual(self.pe.fare(8, "Grand Est"), 3.2)
+        # bande 65-110 : 3,605 + 0,1859×65,8 = 15,84 -> 15,90 €.
+        self.assertEqual(self.pe.fare(65.8, "Grand Est"), 15.9)
+        # bande 150-200 : 10,093 + 0,1488×150 = 32,41 -> 32,50 €.
+        self.assertEqual(self.pe.fare(150, "Grand Est"), 32.5)
+
+    def test_fare_affine_pays_de_la_loire(self):
+        # Barème CGV 25/06/2026 (plein tarif) : 3,6096 + 0,1859×87,4 = 19,86 -> 19,90 €.
+        self.assertEqual(self.pe.fare(87.4, "Pays de la Loire"), 19.9)
+        # bande 33-65 : 2,5865 + 0,1996×63,6 = 15,28 -> 15,30 €.
+        self.assertEqual(self.pe.fare(63.6, "Pays de la Loire"), 15.3)
+
+    def test_fare_affine_occitanie(self):
+        # Barème BKN lu par l'utilisateur : 3,246 + 0,1673×73,0 = 15,46 -> 15,50 €.
+        self.assertEqual(self.pe.fare(73.0, "Occitanie"), 15.5)
+        # bande 33-65 : 2,327 + 0,1794×50,5 = 11,39 -> 11,40 € (réel 11,70).
+        self.assertEqual(self.pe.fare(50.5, "Occitanie"), 11.4)
+        # bande 301-500 : 15,339 + 0,1157×308,2 = 51,00 -> 51,00 € (réel 50,10).
+        self.assertEqual(self.pe.fare(308.2, "Occitanie"), 51.0)
+
+    def test_fare_rule_repli_sur_formule(self):
+        # Au-delà de max_km (159,3) la BFC retombe sur la formule (405 km -> ~41 €).
+        self.assertEqual(self.pe.fare(405, "Bourgogne-Franche-Comté"), 41.0)
 
     def test_fare_region_inconnue_utilise_defaut(self):
         # région absente de la config -> default_scale (courbe nationale) ;
         # la Bourgogne (scale 0.9865) est calibrée pour coller à 41,00 €.
-        self.assertEqual(self.pe.fare(405, "INCONNUE"), self.pe.fare(405, "Occitanie"))
+        self.assertEqual(self.pe.fare(405, "INCONNUE"), self.pe.fare(405, "Région bidon"))
         self.assertNotEqual(self.pe.fare(405, "INCONNUE"), self.pe.fare(405, "Bourgogne-Franche-Comté"))
 
     # --------------------------------------------------------------- régions
@@ -157,16 +219,17 @@ class PricingTestCase(unittest.TestCase):
         self.assertEqual(info["region"], "INCONNUE")
 
     def test_dijon_besancon_carte_bfc(self):
-        # Dijon -> Besançon : 20,00 € plein tarif ; solidaire BFC (-75%) -> 5,00 €.
+        # Dijon -> Besançon : 19,00 € plein tarif (escalier Mobigo, validé
+        # 14/08) ; solidaire BFC (-75%) -> 4,75 €.
         js = self.e.depart_after_wide(
             DATE, self.resolve("Dijon"), self.resolve("Besançon Viotte"),
             7 * 60, 2, "train_only", None,
         )
         self.assertTrue(js)
         info = self.pe.journey_price(js[0])
-        self.assertEqual(info["price_normal_eur"], 20.0)
+        self.assertEqual(info["price_normal_eur"], 19.0)
         red = self.pe.journey_price(js[0], cards=[BFC_SOLIDAIRE])
-        self.assertEqual(red["price_reduced_eur"], 5.0)
+        self.assertEqual(red["price_reduced_eur"], 4.75)
         self.assertEqual([c["shortName"] for c in red["cards"]], ["Tarif réduit solidaire"])
 
     def test_meilleure_carte_gagne(self):
@@ -176,7 +239,7 @@ class PricingTestCase(unittest.TestCase):
             7 * 60, 2, "train_only", None,
         )
         red = self.pe.journey_price(js[0], cards=[BFC_26, BFC_SOLIDAIRE])
-        self.assertEqual(red["price_reduced_eur"], 5.0)
+        self.assertEqual(red["price_reduced_eur"], 4.75)
 
     def test_carte_hors_region_sans_effet(self):
         # Une carte HdF ne réduit pas un trajet bourguignon.
@@ -205,14 +268,21 @@ class PricingTestCase(unittest.TestCase):
         info, j = found
         base = self.pe.journey_price(j)
         self.assertLess(info["price_reduced_eur"], base["price_normal_eur"])
-        # prix réduit = somme des segments ; chaque segment Hauts-de-France est
-        # à -50 %, les segments Normandie restent pleins. (Le train
-        # Amiens->Rouen traverse la frontière : il est découpé à Formerie.)
-        segs = base["split"]["segments"] if base.get("split") else base["legs"]
+        # prix réduit = somme sur TOUS les legs : les trains découpés
+        # intra-train paient par segment régional, les autres legs un billet
+        # unitaire ; chaque portion Hauts-de-France est à -50 %, les portions
+        # Normandie restent pleines. (Le train Amiens->Rouen traverse la
+        # frontière : il est découpé à Formerie ; le Lille->Amiens est un
+        # billet HdF à part.)
         expected = 0.0
-        for seg in segs:
-            fare = self.pe.fare(seg["km"], seg["region"])
-            expected += self.pe._discount(fare, 0.5) if seg["region"] == "Hauts-de-France" else fare
+        for leg in base["legs"]:
+            if leg.get("segments"):
+                for seg in leg["segments"]:
+                    fare = self.pe.fare(seg["km"], seg["region"])
+                    expected += self.pe._discount(fare, 0.5) if seg["region"] == "Hauts-de-France" else fare
+            else:
+                fare = self.pe.fare(leg["km"], leg["region"])
+                expected += self.pe._discount(fare, 0.5) if leg["region"] == "Hauts-de-France" else fare
         self.assertAlmostEqual(info["price_reduced_eur"], round(expected, 2), delta=0.01)
 
     # ------------------------------------------------------- §32 split intra-train
@@ -366,6 +436,26 @@ class PricingTestCase(unittest.TestCase):
         # le prix affiché devient le total découpé
         self.assertEqual(info["price_reduced_eur"], split["price_reduced_split_eur"])
         self.assertEqual(info["price_normal_eur"], split["price_split_eur"])
+
+    def test_distance_pk_jonction_angers(self):
+        # Régression 15/08 : la jonction Angers (515000 ↔ 450000) était ancrée
+        # au même PK des deux côtés (342,95), mais le PK est spécifique à chaque
+        # ligne → Nantes-Le Mans surestimé à 219,4 km (réel ~185).
+        # K15 Nantes -> Le Mans doit valoir ~183 km et ~37,4 € plein tarif.
+        from src.pricing import PricingEngine  # noqa: F811
+        pe = self.pe
+        for tid, ti in self.g.trip_index.items():
+            t = self.g.trips[ti]
+            if t.route is not None and self.g.routes[t.route].short_name == "K15":
+                sts = [self.g.stops[st.stop].name for st in t.stop_times]
+                if sts and sts[0] == "Nantes":
+                    nm = self.g.stop_index.get("StopArea:OCE87481002")
+                    lm = self.g.stop_index.get("StopArea:OCE87396002")
+                    km = pe.leg_km(ti, nm, lm)
+                    self.assertAlmostEqual(km, 183.0, delta=4.0)
+                    fare = pe.fare(km, "Pays de la Loire")
+                    self.assertAlmostEqual(fare, 37.4, delta=1.0)
+                    break
 
 
 if __name__ == "__main__":

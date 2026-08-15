@@ -274,8 +274,8 @@ class ApiTestCase(unittest.TestCase):
         self.assertIn("price_reduced_eur", j)
         self.assertLess(j["price_reduced_eur"], j["price_normal_eur"])
         self.assertEqual(j["pricing"]["cards"][0]["id"], self.BFC_SOLIDAIRE)
-        # 20,00 € plein tarif × 0,25 -> 5,00 €
-        self.assertAlmostEqual(j["price_reduced_eur"], 5.0, delta=0.01)
+        # 19,00 € plein tarif (escalier Mobigo) × 0,25 -> 4,75 €
+        self.assertAlmostEqual(j["price_reduced_eur"], 4.75, delta=0.01)
 
     def test_journeys_prix_reduit_egal_normal_sans_carte(self):
         r = self.client.get(

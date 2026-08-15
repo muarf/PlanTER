@@ -1,18 +1,23 @@
-# T12 — Modèle de tarification TER (ESTIMATION v1).
+# T12 — Modèle de tarification TER (ESTIMATION v2 — règles par région).
 #
-# Formule : prix = scale_region × (a·√km + b·km), arrondi aux `round_to`
-# centimes, plancher `min_eur`.
+# Deux couches :
+#   (1) RÈGLE RÉGIONALE (ci-dessous ; source data/pricing_rules.yaml) : grille
+#       en escalier (prix forfaitaire par palier) ou affine P = a + b·d par
+#       palier. Validée contre les prix réels vérifiés (14/08/2026) :
+#         - Centre-Val de Loire, Bretagne, Bourgogne-Franche-Comté : 0,00 €
+#           d'erreur moyenne (grilles en escalier) ;
+#         - Provence-Alpes-Côte d'Azur, Hauts-de-France : ±0,30-0,60 € ;
+#         - AURA / Nouvelle-Aquitaine : affines recalibrées (× 1,09 / × 1,02).
+#       Paliers semi-ouverts [min, max) : un km de 15,9 appartient au palier
+#       « 1 à 16 ». Le prix affine est arrondi au décime supérieur. Au-delà du
+#       `max_km` validé d'une règle, repli sur la formule (2), borné entre le
+#       dernier palier de la grille (monotonie) et le plafond `max_eur`.
+#   (2) FORMULE CONTINUE : prix = scale_region × (a·√km + b·km), arrondi aux
+#       `round_to` centimes, plancher `min_eur` (fallback par défaut).
 #
 #   km = distance ferroviaire ESTIMÉE = somme des haversine entre arrêts
 #        consécutifs d'un leg × rail_factor (approximation de la longueur de
 #        voie, toujours > distance à vol d'oiseau).
-#
-# La courbe (a, b) est calibrée sur des prix TER observés (Trainline,
-# 12/08/2026) :
-#   - Bourgogne-Franche-Comté : 405 km de voie -> 41,00 €
-#     (Paris -> Dijon -> Besançon, billet unique dégressif)
-#   - Hauts-de-France : 112 km -> 22,10 € (Lille -> Amiens)
-#   - Normandie : 112 km -> 20,30 € (Amiens -> Rouen)
 #
 # Règle d'agrégation (§ Annexe C) :
 #   - trajet MONO-RÉGION  : un seul billet sur la distance totale cumulée
@@ -20,24 +25,116 @@
 #   - trajet PLURI-RÉGION : un billet par tronçon, sommé (pas d'accord
 #     tarifaire inter-régions).
 #
-# `scale` par région ajuste la courbe de référence pour coller aux prix
-# observés ; sans entrée, `default_scale` s'applique. Ces valeurs sont des
-# ESTIMATIONS provisoires, à affiner avec davantage d'observations.
+# Limites connues (14/08/2026) : tarifs d'axe dérogatoires non couverts par
+# les règles (Lyon-Grenoble, Clermont-Lyon, Nice-Grasse, Caen-Cherbourg) et
+# distances sous-estimées par le haversine×1,17 (référentiel PK à intégrer).
 
 rail_factor: 1.17        # haversine -> longueur de voie approchée
 min_eur: 3.00            # prix plancher d'un billet
 round_to: 0.05           # arrondi aux 5 centimes
-a: 1.934                 # terme √km
-b: 0.00652               # terme km
+a: 1.934                 # terme √km (formule de repli)
+b: 0.00652               # terme km (formule de repli)
 default_scale: 1.0
 
 regions:
+  # --- Règles validées (grilles/barèmes) ------------------------------
   Bourgogne-Franche-Comté:
-    scale: 0.9865        # 405 km -> 41,00 € (cible T12)
-  Hauts-de-France:
-    scale: 1.0425        # 112 km -> 22,10 €
+    scale: 0.9865        # repli hors grille (sans objet : grille complète)
+    rule:
+      type: escalier     # Mobigo, CGV 01/04/2026 : 6/13/19/24/31/36/41 € (7 paliers, 2 € enfant)
+      max_km: 100000
+      bands: [[1, 36, 6.00], [36, 71, 13.00], [71, 101, 19.00], [101, 136, 24.00],
+              [136, 166, 31.00], [166, 201, 36.00], [201, 100000, 41.00]]
+  Centre-Val de Loire:
+    scale: 1.0
+    rule:
+      type: escalier     # Rémi : P = a (b = 0), validé 6/6 points
+      max_km: 125
+      bands: [[1, 16, 3.40], [16, 31, 6.80], [31, 51, 10.30], [51, 66, 13.70],
+              [66, 86, 17.10], [86, 106, 20.50], [106, 126, 24.00]]
+  Bretagne:
+    scale: 1.0
+    rule:
+      type: escalier     # BreizhGo plein tarif adulte, validé 6/6 points
+      max_km: 300
+      bands: [[1, 61, 12.00], [61, 111, 17.00], [111, 161, 22.00], [161, 100000, 30.00]]
   Normandie:
-    scale: 0.9575        # 112 km -> 20,30 €
+    scale: 1.0           # Nomad — grille CGV officielle (30/03/2026), plein tarif TEMPO
+    rule:
+      type: escalier     # paliers 25 km puis 20 km au-delà de 200 km, validé sur 5 points
+      max_km: 10000
+      bands: [[1, 26, 4.40], [26, 51, 8.80], [51, 76, 13.20], [76, 101, 17.60],
+              [101, 126, 22.00], [126, 151, 26.40], [151, 176, 30.80], [176, 201, 35.20],
+              [201, 221, 37.40], [221, 241, 39.60], [241, 261, 41.80], [261, 281, 44.00],
+              [281, 301, 46.20], [301, 321, 48.40], [321, 341, 50.60], [341, 361, 52.80],
+              [361, 381, 55.00], [381, 100000, 57.20]]
+  Provence-Alpes-Côte d'Azur:
+    scale: 1.0
+    rule:
+      type: affine       # barème ZOU!, doc 3.4 — ±0,10-0,50 € sur points vérifiés
+      max_km: 800
+      min_eur: 2.20
+      bands: [[1, 17, 2.470, 0.2274], [17, 33, 1.852, 0.2532], [33, 65, 3.981, 0.1869],
+              [65, 110, 4.939, 0.1741], [110, 150, 6.339, 0.1667], [150, 200, 11.019, 0.1396],
+              [200, 301, 10.633, 0.1413], [301, 500, 17.526, 0.1204]]
+  Hauts-de-France:
+    scale: 1.0425        # repli si besoin
+    rule:
+      type: affine       # barème HdF, doc 3.1 — ±0,50 € sur axes Lille (arcades)
+      max_km: 800
+      min_eur: 1.20
+      bands: [[1, 17, 0.859, 0.2144], [17, 33, 0.277, 0.2388], [33, 65, 2.284, 0.1761],
+              [65, 110, 3.187, 0.1643], [110, 150, 4.506, 0.1572], [150, 200, 8.917, 0.1316],
+              [200, 301, 8.553, 0.1334], [301, 500, 15.051, 0.1137], [500, 800, 20.336, 0.1016]]
+  Nouvelle-Aquitaine:
+    scale: 1.02          # recalibrage 2026 (doc 3.2, +2 %)
+    rule:
+      type: affine
+      max_km: 10000
+      bands: [[1, 17, 0.929, 0.2321], [17, 33, 0.298, 0.2584], [33, 65, 2.471, 0.1907],
+              [65, 110, 3.450, 0.1777], [110, 150, 4.877, 0.1702], [150, 200, 9.653, 0.1425],
+              [200, 301, 9.259, 0.1442], [301, 500, 16.295, 0.1229], [500, 800, 22.018, 0.1099],
+              [800, 10000, 38.443, 0.0901]]
+  Auvergne-Rhône-Alpes:
+    scale: 1.03          # CGV TER AURA V202603 (05/2026), indexation INSEE 2026
+    rule:
+      type: affine
+      max_km: 10000
+      min_eur: 1.20
+      bands: [[1, 17, 0.8650, 0.2362], [17, 33, 0.2550, 0.2596], [33, 65, 2.3820, 0.1924],
+              [65, 110, 3.4510, 0.1792], [110, 150, 4.8760, 0.1720], [150, 200, 9.7220, 0.1446],
+              [200, 301, 9.3670, 0.1455], [301, 500, 16.4050, 0.1242], [500, 800, 22.9500, 0.1110],
+              [800, 10000, 38.8500, 0.0906]]
+  Grand Est:
+    scale: 1.0           # CGV TER GE V38 (08/2026), tarifs 01/01/2026
+    rule:
+      type: affine       # P = a + b·d ; palier fixe 1-10 km = 3,20 €
+      max_km: 10000
+      min_eur: 1.20      # minimum de perception 2nde classe
+      bands: [[1, 11, 3.20, 0.0], [11, 17, 0.972, 0.2427], [17, 33, 0.314, 0.2702],
+              [33, 65, 2.583, 0.1995], [65, 110, 3.605, 0.1859], [110, 150, 5.101, 0.1779],
+              [150, 200, 10.093, 0.1488], [200, 301, 9.682, 0.1509], [301, 500, 17.038, 0.1285],
+              [500, 800, 23.894, 0.1149], [800, 10000, 40.690, 0.0942]]
+  Pays de la Loire:
+    scale: 1.0           # CGV TER PDL 25/06/2026, tarifs 01/07/2026 (plein tarif)
+    rule:
+      type: affine       # P = a + b·d (plein tarif ; billet ecco = promo 1-22 €)
+      max_km: 10000
+      min_eur: 1.20
+      bands: [[1, 17, 0.9723, 0.2429], [17, 33, 0.3129, 0.2707], [33, 65, 2.5865, 0.1996],
+              [65, 110, 3.6096, 0.1859], [110, 150, 5.1051, 0.1780], [150, 200, 10.1040, 0.1491],
+              [200, 301, 9.6921, 0.1510], [301, 500, 17.0561, 0.1287], [500, 800, 23.0444, 0.1150],
+              [800, 10000, 40.2352, 0.0944]]
+  Occitanie:
+    scale: 1.0           # liO — barème CGV officiel (BKN), lu par l'utilisateur
+    rule:
+      type: affine       # P = a + b·d ; arrondi au décime supérieur
+      max_km: 10000
+      min_eur: 1.10
+      bands: [[1, 17, 0.874, 0.2184], [17, 33, 0.281, 0.2433], [33, 65, 2.327, 0.1794],
+              [65, 110, 3.246, 0.1673], [110, 150, 4.591, 0.1601], [150, 200, 9.087, 0.1340],
+              [200, 301, 8.717, 0.1358], [301, 500, 15.339, 0.1157], [500, 800, 20.725, 0.1035],
+              [800, 10000, 36.185, 0.0848]]
 
 # T12 §33/§34 — Accords interrégionaux (recherche 13/08/2026).
 #

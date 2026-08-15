@@ -230,6 +230,24 @@ class RaptorTestCase(unittest.TestCase):
         self.assertIn("T", d["departure"])
         self.assertIn("+02:00", d["departure"])
 
+    def test_direct_marseille_nice_trsi(self):
+        # Régression : le feed national SNCF ne couvre pas les trains ZOU!
+        # Transdev RSI (Marseille <-> Nice directs, ex. 17481) ; ils sont
+        # fusionnés depuis data/ter/gtfs_trsi.zip. Un direct doit exister
+        # sans correspondance, avec son numéro de train et la ligne SUD_IV15.
+        mrs = self.resolve("Marseille Saint-Charles")
+        nce = self.resolve("Nice-Ville")
+        js = self.e.depart_after_wide(DATE, mrs, nce, _m(9, 0), 6, "train_only", None)
+        directs = [j for j in js if j.transfers == 0]
+        self.assertTrue(directs, "aucun direct Marseille -> Nice (TRSI absent ?)")
+        j = directs[0]
+        self.assertEqual(len(j.legs), 1)
+        leg = j.legs[0]
+        self.assertEqual(leg.line, "SUD_IV15")
+        self.assertTrue(leg.vehicle_label.isdigit())
+        self.assertEqual(leg.from_name, "Marseille Saint-Charles")
+        self.assertEqual(leg.to_name, "Nice-Ville")
+
 
 if __name__ == "__main__":
     unittest.main()

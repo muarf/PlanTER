@@ -489,7 +489,7 @@ def _journey_alerts(alerts, j, g) -> list:
             stop_idxs.append(idx)
         m = gtfs_rt._TRAIN_NO_RE.match(leg.trip_id)
         if m:
-            train_numbers.append(m.group(1))
+            train_numbers.append(m.group(1) or m.group(2))
     return alerts.relevant(stop_idxs, train_numbers)
 
 

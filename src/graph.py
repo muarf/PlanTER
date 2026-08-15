@@ -89,6 +89,11 @@ class Graph:
     # (stop_a, stop_b) -> minutes
     transfer_edges: dict[tuple[int, int], int] = field(default_factory=dict)
 
+    # Distances ferroviaires PK par hop : (trip_idx, k) -> km entre les
+    # arrêts consécutifs k et k+1 du trip (RfnIndex, build_graph.py). Les hops
+    # sans ancres PK sont absents : pricing.py retombe sur haversine × rail_factor.
+    hop_km: dict[tuple[int, int], float] = field(default_factory=dict)
+
     # Circulation : service_id -> dates (format int YYYYMMDD)
     service_dates: dict[str, frozenset[int]] = field(default_factory=dict)
 

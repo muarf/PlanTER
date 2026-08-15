@@ -1,27 +1,34 @@
-"""T12 — pricing.py : estimation tarifaire TER (MVP).
+"""T12 — pricing.py : estimation tarifaire TER (MVP, modèle v2).
 
 Modèle (cf. config/pricing.yaml) :
-- distance ferroviaire estimée d'un leg = somme des haversine entre les
-  arrêts consécutifs du train × `rail_factor` ;
+- distance ferroviaire d'un leg = somme des distances **PK** par hop
+  (précalculées dans Graph.hop_km, cf. rfn.py) ; pour les hops sans ancres
+  PK, repli haversine entre arrêts consécutifs × `rail_factor` ;
 - région d'un train = région majoritaire de ses arrêts (config/station_regions) ;
-- prix d'un billet = scale_region × (a·√km + b·km), arrondi aux 5 centimes,
-  plancher min_eur ;
+- prix d'un billet : RÈGLE RÉGIONALE si la région en a une (escalier = grille
+  forfaitaire, affine = a + b·d par palier) dans sa plage de distance validée
+  (`max_km`) ; sinon formule de repli scale_region × (a·√km + b·km) arrondie
+  aux 5 centimes, plancher min_eur ;
 - agrégation : trajet mono-région -> un billet sur la distance totale cumulée
   (dégressivité globale) ; pluri-région -> somme des billets par tronçon ;
+- segments interrégionaux « gap » (pas d'accord bilatéral, §33) : plein tarif,
+  tarif = moyenne des barèmes des deux régions limitrophes (« matrice moyenne »,
+  méthode 1 du doc des barèmes) ;
 - cartes de réduction (T12) : chaque carte a une fraction `pay` du plein tarif
   (0.50 = -50 %) et une région d'application (déduite de son nom). La réduction
   ne s'applique QUE sur les segments de la région de la carte ; le tarif réduit
   retenu est la meilleure réduction parmi les cartes demandées.
 
-Les prix sont des ESTIMATIONS : le modèle est calibré sur quelques prix
-observés (Trainline, 12/08/2026) et les barèmes régionaux réels n'y sont pas
-tous disponibles. L'API marque ces prix comme estimés.
+Les prix sont des ESTIMATIONS : les règles par région sont validées sur les
+prix réels vérifiés (14/08/2026, cf. data/pricing_rules.yaml) mais les tarifs
+d'axe dérogatoires et la précision des distances restent des limites connues.
+L'API marque ces prix comme estimés.
 """
 
 from __future__ import annotations
 
 import json
-from math import asin, cos, radians, sin, sqrt
+from math import asin, ceil, cos, radians, sin, sqrt
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -68,6 +75,7 @@ class PricingEngine:
         self.b = float(cfg["b"])
         self.default_scale = float(cfg["default_scale"])
         self.region_scale = {name: float(v["scale"]) for name, v in cfg.get("regions", {}).items()}
+        self.region_rule = {name: v.get("rule") for name, v in cfg.get("regions", {}).items() if v.get("rule")}
         self._cross_rules: dict[tuple[str, str], str] = {}
         for a, b, rule in cfg.get("cross_region_rules", []):
             self._cross_rules[(a, b)] = rule
@@ -151,6 +159,16 @@ class PricingEngine:
         return self._trip_region[trip_idx]
 
     # ------------------------------------------------------ distance d'un leg
+    def _hop_km(self, trip_idx: int, k: int) -> float:
+        """Distance ferroviaire du hop k -> k+1 du trip : distance PK
+        précalculée (Graph.hop_km) si disponible, sinon haversine × rail_factor."""
+        d = getattr(self.graph, "hop_km", {}).get((trip_idx, k))
+        if d is not None:
+            return d
+        stops = self.graph.trips[trip_idx].stop_times
+        s1, s2 = self.graph.stops[stops[k].stop], self.graph.stops[stops[k + 1].stop]
+        return haversine_km(s1.lat, s1.lon, s2.lat, s2.lon) * self.rail_factor
+
     def leg_km(self, trip_idx: int, board_stop: int, alight_stop: int) -> float:
         key = (trip_idx, board_stop, alight_stop)
         if key not in self._leg_km:
@@ -164,26 +182,24 @@ class PricingEngine:
             km = 0.0
             if 0 <= bi < ai:
                 for k in range(bi, ai):
-                    s1, s2 = self.graph.stops[stops[k].stop], self.graph.stops[stops[k + 1].stop]
-                    km += haversine_km(s1.lat, s1.lon, s2.lat, s2.lon)
-            self._leg_km[key] = km * self.rail_factor
+                    km += self._hop_km(trip_idx, k)
+            self._leg_km[key] = km
         return self._leg_km[key]
 
     # -------------------------------------- segments régionaux intra-train
     def _segment(self, trip_idx: int, i0: int, i1: int, region: str) -> dict:
         """Segment régional [positions i0..i1] d'un trip : gares extrêmes,
-        distance (haversine × rail_factor) et horaires (minutes minuit)."""
+        distance (PK par hop, sinon haversine × rail_factor) et horaires."""
         stops = self.graph.trips[trip_idx].stop_times
         gs = self.graph.stops
         km = 0.0
         for k in range(i0, i1):
-            s1, s2 = gs[stops[k].stop], gs[stops[k + 1].stop]
-            km += haversine_km(s1.lat, s1.lon, s2.lat, s2.lon)
+            km += self._hop_km(trip_idx, k)
         return {
             "region": region,
             "from": {"stop_area_id": gs[stops[i0].stop].id, "name": gs[stops[i0].stop].name},
             "to": {"stop_area_id": gs[stops[i1].stop].id, "name": gs[stops[i1].stop].name},
-            "km": round(km * self.rail_factor, 1),
+            "km": round(km, 1),
             "departure_min": stops[i0].dep,
             "arrival_min": stops[i1].arr,
         }
@@ -219,6 +235,7 @@ class PricingEngine:
                     # Pierrelatte -> Bollène-la-Croisière).
                     gap = self._segment(trip_idx, i - 1, i, cur)
                     gap["gap"] = True
+                    gap["cross_region"] = region
                     segments.append(gap)
                     begin = i
                 else:
@@ -257,11 +274,66 @@ class PricingEngine:
         return out
 
     # ---------------------------------------------------------------- tarif
+    @staticmethod
+    def _rule_price(rule: dict, km: float, scale: float = 1.0) -> float | None:
+        """Prix d'un billet selon la règle régionale (paliers semi-ouverts
+        [min, max)), ou None si le km est hors grille. `scale` est la
+        recalibration régionale (affine seulement)."""
+        t = rule.get("type")
+        if t == "escalier":
+            for lo, hi, price in rule.get("bands", []):
+                if lo <= km < hi:
+                    return float(price)
+        elif t == "affine":
+            for lo, hi, a, b in rule.get("bands", []):
+                if lo <= km < hi:
+                    p = (a + b * km) * scale
+                    p = round(ceil(p / 0.10 - 1e-9) * 0.10, 2)  # décime supérieur
+                    return max(p, float(rule.get("min_eur", 0.0)))
+        elif t == "escalier_step":
+            return ceil(km / rule["band"]) * rule["base"]
+        return None
+
     def fare(self, km: float, region: str) -> float:
-        """Prix estimé d'un billet sur `km` km dans `region`."""
+        """Prix estimé d'un billet sur `km` km dans `region`.
+
+        Règle régionale si disponible dans sa plage validée ; sinon formule
+        de repli scale_region × (a·√km + b·km). Le champ `max_eur` d'une
+        règle plafonne le tarif (ex. Mobigo « 6 à 41 € maxi »)."""
+        rule = self.region_rule.get(region)
+        max_eur = rule.get("max_eur") if rule else None
+        if rule is not None and km <= rule.get("max_km", float("inf")):
+            scale = self.region_scale.get(region, self.default_scale)
+            p = self._rule_price(rule, km, scale)
+            if p is not None:
+                return min(p, max_eur) if max_eur is not None else p
+        # Repli formule (2) : le tarif réel ne redescend jamais sous le dernier
+        # palier de la grille, et ne dépasse pas le plafond régional `max_eur`.
+        fallback_min = rule["bands"][-1][2] if (rule and rule.get("type") == "escalier" and rule.get("bands")) else self.min_eur
         scale = self.region_scale.get(region, self.default_scale)
         raw = scale * (self.a * sqrt(km) + self.b * km) if km > 0 else 0.0
-        return max(self.min_eur, round(round(raw / self.round_to) * self.round_to, 2))
+        p = max(fallback_min, round(round(raw / self.round_to) * self.round_to, 2))
+        return min(p, max_eur) if max_eur is not None else p
+
+    def _cross_fare(self, km: float, r1: str, r2: str) -> float:
+        """Prix d'un segment interrégional « gap » (pas d'accord bilatéral) :
+        moyenne des barèmes des deux régions limitrophes (méthode 1 du doc,
+        « matrice moyenne »), arrondie au décime supérieur."""
+        if km <= 0:
+            return 0.0
+        return round(ceil((self.fare(km, r1) + self.fare(km, r2)) / 2 / 0.10 - 1e-9) * 0.10, 2)
+
+    def _segment_price(self, seg: dict, pay_by_region: dict[str, float]) -> tuple[float, float]:
+        """(Plein tarif, tarif réduit) d'un segment régional : un segment `gap`
+        (interrégional, pas d'accord) est plein tarif via la matrice moyenne
+        (§33) ; les autres appliquent la meilleure carte de leur région."""
+        if seg.get("gap") and seg.get("cross_region"):
+            fare = self._cross_fare(seg["km"], seg["region"], seg["cross_region"])
+        else:
+            fare = self.fare(seg["km"], seg["region"])
+        pay = None if seg.get("gap") else pay_by_region.get(seg["region"])
+        red = self._discount(fare, pay) if pay is not None else fare
+        return fare, red
 
     # ------------------------------------------------------------- trajet
     def journey_price(self, journey, cards: list[str] | None = None) -> dict | None:
@@ -294,7 +366,13 @@ class PricingEngine:
             total_km += km
             regions.add(region)
             card_regions.add(region)
-            entry = {"line": leg.line, "km": round(km, 1), "region": region}
+            entry = {
+                "line": leg.line,
+                "from": self.graph.stops[board].name,
+                "to": self.graph.stops[alight].name,
+                "km": round(km, 1),
+                "region": region,
+            }
             # §32 — un même train traversant plusieurs régions : on annonce le
             # découpage (billet par segment régional) sans changer le prix
             # mono/pluri, qui reste un billet unique dégressif par train.
@@ -362,27 +440,35 @@ class PricingEngine:
             split_regions: list[str] = []
             price_split = 0.0
             price_split_reduced = 0.0
-            for l in split_legs:
-                segs = l["segments"]
-                for s in segs:
-                    fare = self.fare(s["km"], s["region"])
-                    # §33 — segment interrégional `gap` : plein tarif, aucune
-                    # carte ne s'applique (pas d'accord entre les régions).
-                    pay = None if s.get("gap") else pay_by_region.get(s["region"])
+            for l in legs:
+                segs = l.get("segments")
+                if segs:
+                    for s in segs:
+                        # §33 — segment interrégional `gap` : plein tarif, aucune
+                        # carte ne s'applique (pas d'accord entre les régions) ;
+                        # tarif = moyenne des barèmes des deux régions (matrice).
+                        fare, red = self._segment_price(s, pay_by_region)
+                        segments_out.append({**s, "fare_eur": fare, "fare_reduced_eur": red})
+                        price_split += fare
+                        price_split_reduced += red
+                        if s["region"] not in split_regions:
+                            split_regions.append(s["region"])
+                    # gare(s) de coupure : uniquement pour des billets contigus ;
+                    # en présence d'un segment `gap`, l'annonce passe par les gares
+                    # frontières du segment plein tarif (§33).
+                    if not any(s.get("gap") for s in segs):
+                        for i in range(len(segs) - 1):
+                            junction = segs[i]["to"]["name"]
+                            if junction not in junction_stations:
+                                junction_stations.append(junction)
+                else:
+                    # leg simple (train sans découpage intra-train) : son billet
+                    # unitaire entre en compte dans le total découpé.
+                    fare = self.fare(l["km"], l["region"])
+                    pay = pay_by_region.get(l["region"])
                     red = self._discount(fare, pay) if pay is not None else fare
-                    segments_out.append({**s, "fare_eur": fare, "fare_reduced_eur": red})
                     price_split += fare
                     price_split_reduced += red
-                    if s["region"] not in split_regions:
-                        split_regions.append(s["region"])
-                # gare(s) de coupure : uniquement pour des billets contigus ;
-                # en présence d'un segment `gap`, l'annonce passe par les gares
-                # frontières du segment plein tarif (§33).
-                if not any(s.get("gap") for s in segs):
-                    for i in range(len(segs) - 1):
-                        junction = segs[i]["to"]["name"]
-                        if junction not in junction_stations:
-                            junction_stations.append(junction)
             split = {
                 "junction_stations": junction_stations,
                 "regions": split_regions,
@@ -392,6 +478,24 @@ class PricingEngine:
                 "single_ticket_eur": round(single_full, 2),
                 "single_ticket_reduced_eur": round(single_reduced, 2),
             }
+
+        # Prix par tronçon pour l'affichage : un train découpé paie par
+        # segment régional, un train simple un billet unitaire sur sa distance.
+        for jl in legs:
+            segs = jl.get("segments")
+            if segs:
+                f = fr = 0.0
+                for s in segs:
+                    fare, red = self._segment_price(s, pay_by_region)
+                    f += fare
+                    fr += red
+                jl["fare_eur"] = round(f, 2)
+                jl["fare_reduced_eur"] = round(fr, 2)
+            else:
+                fare = self.fare(jl["km"], jl["region"])
+                pay = pay_by_region.get(jl["region"])
+                jl["fare_eur"] = fare
+                jl["fare_reduced_eur"] = self._discount(fare, pay) if pay is not None else fare
 
         if split is not None:
             total_eur = split["price_split_eur"]
@@ -406,5 +510,4 @@ class PricingEngine:
             "price_reduced_eur": price_reduced_eur,
             "cards": applied,
             "split": split,
-            "note": "prix estimés (modèle v1 calibré sur 3 prix observés Trainline, 12/08/2026)",
         }

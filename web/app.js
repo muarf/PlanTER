@@ -282,7 +282,7 @@ function fmtPrice(eur) {
 
 function priceChip(j) {
   if (j.price_normal_eur == null) return "";
-  const title = (j.pricing && j.pricing.note) || "prix estimé";
+  const title = "prix estimé";
   if (j.price_reduced_eur != null && j.price_reduced_eur < j.price_normal_eur) {
     return ` <span class="price-chip" title="${title}">≈ <s>${fmtPrice(j.price_normal_eur)}</s> ${fmtPrice(j.price_reduced_eur)}</span>`;
   }
@@ -293,7 +293,9 @@ function priceBlock(j) {
   if (j.price_normal_eur == null || !j.pricing) return "";
   const rows = j.pricing.legs
     .map((l) => `<div class="price-leg"><span class="price-leg-line">${l.line}</span>
-      <span>${l.km} km</span><span class="price-leg-region">${l.region}</span></div>`)
+      ${l.from && l.to ? `<span class="price-leg-cities">${l.from} → ${l.to}</span>` : ""}<span>${l.km} km</span>
+      <span class="price-leg-region">${l.region}</span>
+      <span class="price-leg-fare">${fmtPrice(l.fare_eur)}${l.fare_reduced_eur != null && l.fare_reduced_eur < l.fare_eur ? ` → ${fmtPrice(l.fare_reduced_eur)}` : ""}</span></div>`)
     .join("");
   const rule = j.pricing.split
     ? "billets découpés par région, sommé"
@@ -332,8 +334,7 @@ function priceBlock(j) {
   return `<div class="price-note">
     <strong>Prix estimé : ≈ ${fmtPrice(j.price_normal_eur)}</strong>
     ${reduced}
-    <div class="price-detail">${rows}<div class="price-rule">Règle : ${rule}.</div>
-    <small>${j.pricing.note}.</small></div>
+    <div class="price-detail">${rows}<div class="price-rule">Règle : ${rule}.</div></div>
     ${splitBlock}
   </div>`;
 }
