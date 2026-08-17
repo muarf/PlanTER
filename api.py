@@ -216,7 +216,7 @@ def _minutes(iso: str) -> int:
 
 # ---------------------------------------------------------------- application
 app = FastAPI(
-    title="planTER API",
+    title="PlanTER API",
     description="Recherche d'itinéraires 100% TER (moteur McRAPTOR).",
     version="0.1.0",
     lifespan=_lifespan,

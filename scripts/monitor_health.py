@@ -40,7 +40,7 @@ def notify(msg, is_error=True):
                 os.remove(STATE_FILE)
             except Exception:
                 pass
-            send_alert("✅ [planTER] L'API est de nouveau opérationnelle et saine.")
+            send_alert("✅ [PlanTER] L'API est de nouveau opérationnelle et saine.")
 
 def check_health():
     # We check the local API endpoint (directly on the loopback) to bypass external network issues if any,
@@ -48,25 +48,25 @@ def check_health():
     # Let's check both or check the local one. Let's check the local one http://127.0.0.1:8000/v1/health.
     url = "http://127.0.0.1:8000/v1/health"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "planTER-Monitor"})
+        req = urllib.request.Request(url, headers={"User-Agent": "PlanTER-Monitor"})
         with urllib.request.urlopen(req, timeout=10) as response:
             if response.status != 200:
-                notify(f"❌ [planTER] L'API renvoie un code HTTP {response.status} sur {url} !")
+                notify(f"❌ [PlanTER] L'API renvoie un code HTTP {response.status} sur {url} !")
                 return
             content = response.read().decode("utf-8")
     except Exception as e:
-        notify(f"❌ [planTER] L'API est injoignable sur {url} !\nErreur : {e}")
+        notify(f"❌ [PlanTER] L'API est injoignable sur {url} !\nErreur : {e}")
         return
 
     try:
         data = json.loads(content)
     except Exception as e:
-        notify(f"❌ [planTER] Impossible de parser la réponse JSON de {url} !\nErreur : {e}")
+        notify(f"❌ [PlanTER] Impossible de parser la réponse JSON de {url} !\nErreur : {e}")
         return
 
     # Check status
     if data.get("status") != "ok":
-        notify(f"⚠️ [planTER] Statut anormal de l'API : {data.get('status')}")
+        notify(f"⚠️ [PlanTER] Statut anormal de l'API : {data.get('status')}")
         return
 
     # Check last refresh status
@@ -74,22 +74,22 @@ def check_health():
     if last_refresh:
         status = last_refresh.get("status")
         if status in ("error", "degraded"):
-            notify(f"⚠️ [planTER] Le dernier refresh hebdomadaire a échoué (statut: {status}).")
+            notify(f"⚠️ [PlanTER] Le dernier refresh hebdomadaire a échoué (statut: {status}).")
             return
 
     # Check realtime
     realtime = data.get("realtime")
     if realtime:
         if not realtime.get("polling"):
-            notify("⚠️ [planTER] Le polling temps réel GTFS-RT n'est pas actif !")
+            notify("⚠️ [PlanTER] Le polling temps réel GTFS-RT n'est pas actif !")
             return
         elif not realtime.get("fresh"):
-            notify(f"⚠️ [planTER] Le flux temps réel GTFS-RT n'est plus frais (âge: {realtime.get('age_s')}s) !")
+            notify(f"⚠️ [PlanTER] Le flux temps réel GTFS-RT n'est plus frais (âge: {realtime.get('age_s')}s) !")
             return
 
         alerts = realtime.get("alerts")
         if alerts and not alerts.get("fresh") and alerts.get("count", 0) > 0:
-            notify(f"⚠️ [planTER] Le flux d'alertes de service n'est plus frais (âge: {alerts.get('age_s')}s) !")
+            notify(f"⚠️ [PlanTER] Le flux d'alertes de service n'est plus frais (âge: {alerts.get('age_s')}s) !")
             return
             
     # Check coverage end date
@@ -99,7 +99,7 @@ def check_health():
             end_date = datetime.date.fromisoformat(coverage_end)
             days_left = (end_date - datetime.date.today()).days
             if days_left <= 7:
-                notify(f"⚠️ [planTER] Les données GTFS expirent bientôt ! Fin de couverture : {coverage_end} (dans {days_left} jours).")
+                notify(f"⚠️ [PlanTER] Les données GTFS expirent bientôt ! Fin de couverture : {coverage_end} (dans {days_left} jours).")
                 return
         except Exception:
             pass

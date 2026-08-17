@@ -544,7 +544,7 @@ class WebTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("text/html", r.headers["content-type"])
         html = r.text
-        self.assertIn("planTER", html)
+        self.assertIn("PlanTER", html)
         self.assertIn('id="search-form"', html)
         self.assertIn('id="from"', html)
         self.assertIn('id="to"', html)

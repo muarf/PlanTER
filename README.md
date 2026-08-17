@@ -1,4 +1,4 @@
-# planTER
+# PlanTER
 
 ![Build Android APK](https://github.com/muarf/PlanTER/actions/workflows/build-apk.yml/badge.svg)
 
@@ -94,7 +94,7 @@ web/
   index.html        Page d'accueil (recherche)
   app.js            Autocomplete, appels API, rendu
   styles.css        Mobile-first, accessible
-  about.html        Pourquoi planTER
+  about.html        Pourquoi PlanTER
   cards.html        Guide des cartes de réduction
   privacy.html      Politique de confidentialité
 data/

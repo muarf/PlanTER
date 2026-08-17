@@ -1,4 +1,4 @@
-"""Configuration du pipeline de données planTER.
+"""Configuration du pipeline de données PlanTER.
 
 URL du jeu de données global SNCF. Il contient TGV, Intercités et TER :
 c'est le seul fichier encore publié depuis l'été 2025 (les jeux sectoriels
