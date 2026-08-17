@@ -98,7 +98,7 @@ TESTS = [
     ("Grand Est", "Strasbourg-Colmar", 65.8, 15.70),
     ("Grand Est", "Strasbourg-Mulhouse", 108.3, 23.40),
     ("Grand Est", "Strasbourg-Nancy", 149.6, 32.60),   # km réel ~151
-    ("Grand Est", "Metz-Nancy", 70.9, 14.00),          # km réel ~57 (écart distance)
+    ("Grand Est", "Metz-Nancy", 54.4, 13.50),
     # --- Pays de la Loire (affine barème CGV 25/06/2026, plein tarif) ---
     # Nantes-Angers / St-Nazaire / Angers-Le Mans = prix ecco promo (barème > observé).
     ("Pays de la Loire", "Nantes-Le Mans", 185.0, 37.70),  # plein réel → km tarifaire ~185 (modèle 219,4 : distance surestimée)
@@ -108,6 +108,13 @@ TESTS = [
     ("Occitanie", "Montpellier-Béziers", 72.9, 15.50),
     ("Occitanie", "Perpignan-Narbonne", 63.9, 13.90),
     ("Occitanie", "Toulouse-Nîmes", 308.2, 50.10),
+    # --- Nouvelle-Aquitaine (affine CGV, plein tarif guichet) ---
+    ("Nouvelle-Aquitaine", "Bordeaux-Limoges", 224.6, 43.00),
+    ("Nouvelle-Aquitaine", "Bordeaux-La Rochelle", 195.4, 37.60),
+    ("Nouvelle-Aquitaine", "Bordeaux-Pau", 231.9, 43.80),
+    ("Nouvelle-Aquitaine", "Bordeaux-Bayonne", 197.6, 38.10),
+    ("Nouvelle-Aquitaine", "Angouleme-Bordeaux", 134.5, 28.60),
+    ("Nouvelle-Aquitaine", "Perigueux-Bordeaux", 128.1, 26.90),
 ]
 
 
