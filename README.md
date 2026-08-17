@@ -4,7 +4,9 @@
 
 > **https://ter.zvz.fr**
 
-Moteur de recherche d'itinéraires **100% TER** en France — trains régionaux et cars TER, avec estimation tarifaire et cartes de réduction.
+Moteur de recherche d'itinéraires **100% TER** en France — trains régionaux et cars TER, avec estimation tarifaire et cartes de réduction régionales.
+
+> **Prix indicatifs.** Les tarifs affichés sont des estimations basées sur les barèmes officiels. Des offres promotionnelles (web,appyields, ventes flash) peuvent être moins chères. Seul le guichet ou le site de vente de la région donne le prix exact du jour.
 
 ## Mais au fait, pourquoi faire tout ça ?
 
@@ -26,8 +28,8 @@ Dans un monde obnubilé par l'immédiateté, la rentabilité absolue et les TGV 
 ## Fonctionnalités
 
 - **Itinéraires 100% TER** : aucun TGV, aucun Intercités — uniquement des trains régionaux et cars TER, avec jusqu'à 3 correspondances.
-- **Tarification régionale** : prix estimés calibrés sur les barèmes officiels de 8 régions (AURA, BFC, Bretagne, CVL, GE, HdF, Normandie, Occitanie, PACA, PdL).
-- **Cartes de réduction** : 46 cartes TER régionales avec taux week-end/semaine.
+- **Tarification régionale** : prix estimés calibrés sur les barèmes officiels des 11 régions (AURA, BFC, Bretagne, CVL, GE, HdF, Normandie, Nouvelle-Aquitaine, Occitanie, PACA, PdL). L'Île-de-France n'est pas couverte.
+- **Cartes de réduction** : toutes les cartes TER régionales (46 cartes), avec taux week-end/semaine pour Tempo, LibertiO', illico Liberté, Mobigo+ 26+.
 - **Temps réel** : perturbations GTFS-RT, retards, suppressions.
 - **PWA** : installable sur mobile, fonctionne hors-ligne (recherche côté serveur).
 - **Anonymat** : pas de logs, pas de tracking, pas de cookies.
@@ -105,9 +107,9 @@ tests/
 
 ## Données
 
-- **GTFS SNCF** : horaires officiels (open data, licence ODbL).
-- **Barèmes tarifaires** : extraits des CGV de chaque région (AURA, BFC, GE, Normandie, Occitanie, PACA, PdL).
-- **Cartes de réduction** : catalogue Trainline (46 cartes, 11 régions).
+- **GTFS SNCF** : horaires officiels (open data, licence ODbL) — trains + cars TER.
+- **Barèmes tarifaires** : extraits des CGV de chaque région (AURA, BFC, GE, Normandie, Occitanie, PACA, PdL…).
+- **Cartes de réduction** : catalogue régional des cartes TER (toutes régions, pas seulement Trainline).
 
 ## Licence
 
