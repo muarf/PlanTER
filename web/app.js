@@ -54,6 +54,50 @@ const PoW = (() => {
   return { headers };
 })();
 
+/* -------------------------------------------------------- Crypto (chiffrement hybride AES-GCM + RSA-OAEP) */
+const Crypto_ = (() => {
+  let _pubKey = null;
+
+  function pemToBinary(pem) {
+    const b64 = pem.replace(/-----.*-----/g, "").replace(/\s+/g, "");
+    const raw = atob(b64);
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    return buf;
+  }
+
+  async function fetchKey() {
+    if (_pubKey) return _pubKey;
+    const r = await fetch(API_BASE + "/v1/crypto/pubkey");
+    if (!r.ok) throw new Error("crypto_pubkey_failed");
+    const { public_key } = await r.json();
+    const der = pemToBinary(public_key);
+    _pubKey = await crypto.subtle.importKey(
+      "spki", der.buffer, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]
+    );
+    return _pubKey;
+  }
+
+  async function encrypt(plaintext) {
+    const key = await fetchKey();
+    const aesKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder().encode(JSON.stringify(plaintext));
+    const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, enc);
+    const aesRaw = new Uint8Array(await crypto.subtle.exportKey("raw", aesKey));
+    const rsaBuf = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, key, aesRaw);
+    const result = new Uint8Array(rsaBuf.byteLength + iv.byteLength + cipherBuf.byteLength);
+    result.set(new Uint8Array(rsaBuf), 0);
+    result.set(iv, rsaBuf.byteLength);
+    result.set(new Uint8Array(cipherBuf), rsaBuf.byteLength + iv.byteLength);
+    let binary = "";
+    result.forEach(b => binary += String.fromCharCode(b));
+    return btoa(binary);
+  }
+
+  return { encrypt };
+})();
+
 const form = $("#search-form");
 const fromInput = $("#from");
 const toInput = $("#to");
@@ -625,22 +669,21 @@ async function search(timeShiftMin = 0) {
     $("#time").value = time;
   }
 
-  const params = new URLSearchParams({
+  const payload = {
     from: fromInput.value.trim(),
     to: toInput.value.trim(),
     date: $("#date").value,
     time: time,
     datetime_represents: form.elements.datetime_represents.value,
     sort: sortBy,
-    count: "5",
-  });
-  
-  // Ajouter le paramètre pour la priorisation des correspondances
+    count: 5,
+  };
+
   if (prioritizeFewerTransfers) {
-    params.set("prioritize_fewer_transfers", "true");
+    payload.prioritize_fewer_transfers = true;
   }
 
-  if (selectedCards.size) params.set("cards", [...selectedCards].join(","));
+  if (selectedCards.size) payload.cards = [...selectedCards].join(",");
 
   try {
     let headers = {};
@@ -649,7 +692,13 @@ async function search(timeShiftMin = 0) {
     } catch (e) {
       // PoW échoue = pas de requête
     }
-    const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`, { headers });
+    headers["Content-Type"] = "application/json";
+    const encrypted = await Crypto_.encrypt(payload);
+    const res = await fetch(`${API_BASE}/v1/journeys`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ payload: encrypted }),
+    });
     const body = await res.json();
     if (!res.ok) {
       const err = body.error || {};

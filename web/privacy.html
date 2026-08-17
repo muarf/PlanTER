@@ -42,7 +42,7 @@
 
     <section class="card">
       <h2>Côté serveur</h2>
-      <p>Le serveur web de PlanTER est configuré pour ne conserver <strong>aucun journal de connexion</strong> (pas de logs d'accès, pas d'enregistrement d'adresses IP, de dates ou de pages consultées). Comme pour tout service sur Internet, l'infrastructure réseau de l'hébergeur physique (Oracle Cloud) ou votre fournisseur d'accès à Internet acheminent les paquets réseau. Sous réquisition légale ou décision de justice, ces intermédiaires réseau peuvent être contraints de journaliser vos adresses IP de connexion. Cependant, grâce au chiffrement HTTPS, ils ne peuvent en aucun cas savoir quel itinéraire ou quelle gare vous avez recherché.</p>
+      <p>Le serveur web de PlanTER est configuré pour ne conserver <strong>aucun journal de connexion</strong> (pas de logs d'accès, pas d'enregistrement d'adresses IP, de dates ou de pages consultées). Les requêtes de recherche d'itinéraire sont chiffrées côté navigateur : le serveur reçoit uniquement un flux chiffré et ne peut pas lire le contenu de votre requête (gares, date, heure). Même l'opérateur de la machine virtuelle ne peut pas déchiffrer ces données sans la clé privée, qui n'est jamais écrite sur disque. Les seules informations visibles par les intermédiaires réseau (fournisseur d'accès, hébergeur) sont les adresses IP de connexion et le trafic HTTPS.</p>
     </section>
 
     <section class="card">

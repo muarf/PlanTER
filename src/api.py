@@ -19,7 +19,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Body
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -30,6 +30,7 @@ from src.raptor import RaptorEngine, _iso as _iso_min
 from src import gtfs_rt, tictactrip, trainline, trainline_cards
 from src.pricing import PricingEngine
 from src.pow import PoWEngine
+from src.crypto import CryptoEngine
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -43,6 +44,7 @@ _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
 _tt: tictactrip.TictactripClient | None = None
 _pow = PoWEngine()
+_crypto = CryptoEngine()
 _raptor_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="raptor")
 RAPTOR_TIMEOUT_S = 10
 
@@ -265,6 +267,12 @@ def challenge() -> dict:
     return _pow.generate_challenge()
 
 
+@app.get("/v1/crypto/pubkey", tags=["crypto"])
+def crypto_pubkey() -> dict:
+    """Clé publique RSA pour le chiffrement des requêtes (hybride AES-GCM + RSA-OAEP)."""
+    return {"public_key": _crypto.pubkey_pem()}
+
+
 def _realtime_health() -> dict | None:
     """T8 — état des flux GTFS-RT : fraîcheur (âge en s), nombre de trips
     retardés/supprimés, alertes, horodatages. None si le poller n'est pas actif."""
@@ -438,23 +446,10 @@ def _real_prices_for(journey, d: _dt.date, tt) -> dict:
     }
 
 
-@app.get("/v1/journeys", tags=["itinéraires"])
+@app.post("/v1/journeys", tags=["itinéraires"])
 def journeys(
     request: Request,
-    from_: str = Query(..., alias="from", description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
-    to: str = Query(..., description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
-    date: str = Query(..., description="Date du voyage (YYYY-MM-DD)"),
-    time: str = Query(..., description="Heure de référence (HH:MM)"),
-    datetime_represents: str = Query("departure", pattern="^(departure|arrival)$"),
-    max_transfers: int = Query(6, ge=0, le=6),
-    vehicle: str = Query("train_only", pattern="^(all|train_only)$",
-                         description="Mode de recherche : train_only (défaut, pas de cars TER) ou all (avec cars TER)"),
-    count: int = Query(5, ge=1, le=20),
-    sort: str = Query("transfers", pattern="^(departure|duration|transfers)$",
-                      description="Tri des résultats : transfers (le moins de correspondances d'abord, défaut), departure (heure de départ) ou duration (le plus court d'abord)"),
-    use_realtime: bool = Query(True, description="T8 — appliquer les retards/suppressions GTFS-RT (par défaut, les retards réels sont la réalité affichée)"),
-    cards: str = Query("", description="T11 — cartes de réduction TER (ids Trainline, séparés par des virgules). Appliquées au lien de réservation trajet total."),
-    real_prices: bool = Query(False, description="T12bis — chercher les prix réellement vendus (promotions comprises) auprès du service tiers Tictactrip, leg par leg. La requête (gares + date) est alors envoyée à un serveur tiers qui peut journaliser."),
+    body: dict = Body(..., description='{"payload": "base64 du chiffré hybride AES-GCM + RSA-OAEP"}'),
 ) -> dict:
     # PoW : vérification proof-of-work (anti-abus, sans logs)
     if _pow.enabled:
@@ -469,6 +464,48 @@ def journeys(
             raise _error(403, "POW_INVALID", "Difficulty invalide.")
         if not _pow.verify(pow_salt, pow_nonce, diff):
             raise _error(403, "POW_INVALID", "Solution proof-of-work invalide ou expirée.")
+
+    # Déchiffrement du payload
+    payload_b64 = body.get("payload")
+    if not payload_b64:
+        raise _error(400, "MISSING_PAYLOAD", "Champ 'payload' requis (base64 chiffré).")
+    try:
+        params = _crypto.decrypt_b64(payload_b64)
+    except Exception:
+        raise _error(400, "INVALID_PAYLOAD", "Payload chiffré invalide ou corrompu.")
+
+    # Extraction des paramètres
+    from_ = params.get("from", "").strip()
+    to = params.get("to", "").strip()
+    date = params.get("date", "").strip()
+    time = params.get("time", "").strip()
+    if not from_ or not to or not date or not time:
+        raise _error(400, "MISSING_PARAMS", "Champs 'from', 'to', 'date', 'time' requis dans le payload.")
+
+    datetime_represents = params.get("datetime_represents", "departure")
+    if datetime_represents not in ("departure", "arrival"):
+        datetime_represents = "departure"
+    max_transfers = params.get("max_transfers", 6)
+    if not isinstance(max_transfers, int) or max_transfers < 0 or max_transfers > 6:
+        raise _error(400, "INVALID_PARAM", "max_transfers doit être entre 0 et 6.")
+    vehicle = params.get("vehicle", "train_only")
+    if vehicle not in ("all", "train_only"):
+        raise _error(400, "INVALID_PARAM", "vehicle doit être 'all' ou 'train_only'.")
+    count = params.get("count", 5)
+    if not isinstance(count, int) or count < 1 or count > 20:
+        raise _error(400, "INVALID_PARAM", "count doit être entre 1 et 20.")
+    sort = params.get("sort", "transfers")
+    if sort not in ("departure", "duration", "transfers"):
+        raise _error(400, "INVALID_PARAM", "sort doit être 'departure', 'duration' ou 'transfers'.")
+    use_realtime = params.get("use_realtime", True)
+    if not isinstance(use_realtime, bool):
+        use_realtime = True
+    cards = params.get("cards", "")
+    if not isinstance(cards, str):
+        cards = ""
+    real_prices = params.get("real_prices", False)
+    if not isinstance(real_prices, bool):
+        real_prices = False
 
     engine = get_engine()
     g = engine.graph
