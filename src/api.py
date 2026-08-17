@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -42,6 +43,8 @@ _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
 _tt: tictactrip.TictactripClient | None = None
 _pow = PoWEngine()
+_raptor_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="raptor")
+RAPTOR_TIMEOUT_S = 10
 
 
 def _load_place_groups() -> dict:
@@ -479,10 +482,16 @@ def journeys(
     # sont partagés en lecture seule via snapshot()).
     realtime = _poller.snapshot() if (use_realtime and _poller is not None) else None
 
-    if datetime_represents == "arrival":
-        journeys = engine.arrive_by_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
-    else:
-        journeys = engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+    def _run_raptor():
+        if datetime_represents == "arrival":
+            return engine.arrive_by_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+        else:
+            return engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+
+    try:
+        journeys = _raptor_pool.submit(_run_raptor).result(timeout=RAPTOR_TIMEOUT_S)
+    except _FutureTimeout:
+        raise _error(503, "TIMEOUT", "Le calcul d'itinéraire a pris trop de temps. Réessayez avec des critères plus simples.")
 
     # Tri : §8.2 — par défaut le moins de correspondances d'abord (même trajet
     # plus long) ; sinon par départ ou par durée (« le plus court de la
