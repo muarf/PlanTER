@@ -18,7 +18,7 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -28,6 +28,7 @@ from src.graph import Graph, ALIASES, normalize
 from src.raptor import RaptorEngine, _iso as _iso_min
 from src import gtfs_rt, tictactrip, trainline, trainline_cards
 from src.pricing import PricingEngine
+from src.pow import PoWEngine
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 WEB_DIR = Path(__file__).resolve().parents[1] / "web"
@@ -40,6 +41,7 @@ _engine: RaptorEngine | None = None
 _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
 _tt: tictactrip.TictactripClient | None = None
+_pow = PoWEngine()
 
 
 def _load_place_groups() -> dict:
@@ -254,6 +256,12 @@ def health() -> dict:
     }
 
 
+@app.get("/v1/challenge", tags=["anti-abus"])
+def challenge() -> dict:
+    """Proof-of-work : défi aléatoire (TTL 60s, RAM only)."""
+    return _pow.generate_challenge()
+
+
 def _realtime_health() -> dict | None:
     """T8 — état des flux GTFS-RT : fraîcheur (âge en s), nombre de trips
     retardés/supprimés, alertes, horodatages. None si le poller n'est pas actif."""
@@ -429,6 +437,7 @@ def _real_prices_for(journey, d: _dt.date, tt) -> dict:
 
 @app.get("/v1/journeys", tags=["itinéraires"])
 def journeys(
+    request: Request,
     from_: str = Query(..., alias="from", description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
     to: str = Query(..., description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
     date: str = Query(..., description="Date du voyage (YYYY-MM-DD)"),
@@ -444,6 +453,20 @@ def journeys(
     cards: str = Query("", description="T11 — cartes de réduction TER (ids Trainline, séparés par des virgules). Appliquées au lien de réservation trajet total."),
     real_prices: bool = Query(False, description="T12bis — chercher les prix réellement vendus (promotions comprises) auprès du service tiers Tictactrip, leg par leg. La requête (gares + date) est alors envoyée à un serveur tiers qui peut journaliser."),
 ) -> dict:
+    # PoW : vérification proof-of-work (anti-abus, sans logs)
+    if _pow.enabled:
+        pow_salt = request.headers.get("x-pow-salt", "")
+        pow_nonce = request.headers.get("x-pow-nonce", "")
+        pow_diff = request.headers.get("x-pow-difficulty", "")
+        if not pow_salt or not pow_nonce or not pow_diff:
+            raise _error(403, "POW_REQUIRED", "Proof-of-work requis. Récupérez un défi via /v1/challenge.")
+        try:
+            diff = int(pow_diff)
+        except ValueError:
+            raise _error(403, "POW_INVALID", "Difficulty invalide.")
+        if not _pow.verify(pow_salt, pow_nonce, diff):
+            raise _error(403, "POW_INVALID", "Solution proof-of-work invalide ou expirée.")
+
     engine = get_engine()
     g = engine.graph
     d = _parse_date(date, g)

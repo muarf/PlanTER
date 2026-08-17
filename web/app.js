@@ -10,6 +10,50 @@ const IS_CAPACITOR = typeof window.Capacitor !== "undefined"
   && window.Capacitor.isNativePlatform();
 const API_BASE = IS_CAPACITOR ? "https://ter.zvz.fr" : "";
 
+/* ----------------------------------------------------------- PoW (anti-abus) */
+const PoW = (() => {
+  let _cache = null; // {salt, difficulty, ts}
+
+  async function getChallenge() {
+    if (_cache && (Date.now() - _cache.ts < 50_000)) return _cache;
+    const r = await fetch(API_BASE + "/v1/challenge");
+    if (!r.ok) throw new Error("challenge_failed");
+    const c = await r.json();
+    _cache = { salt: c.salt, difficulty: c.difficulty, ts: Date.now() };
+    return _cache;
+  }
+
+  function sha256hex(str) {
+    // SubtleCrypto est async, mais on fait un fallback sync pour les small difficulty
+    // Utilisation d'un Web Worker serait idéal mais gardons simple pour l'instant
+    const enc = new TextEncoder().encode(str);
+    return crypto.subtle.digest("SHA-256", enc).then(buf =>
+      Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("")
+    );
+  }
+
+  async function solve(salt, difficulty) {
+    const prefix = "0".repeat(difficulty);
+    for (let nonce = 0; nonce < 1_000_000; nonce++) {
+      const h = await sha256hex(salt + ":" + nonce);
+      if (h.startsWith(prefix)) return String(nonce);
+    }
+    throw new Error("pow_unsolvable");
+  }
+
+  async function headers() {
+    const ch = await getChallenge();
+    const nonce = await solve(ch.salt, ch.difficulty);
+    return {
+      "X-PoW-Salt": ch.salt,
+      "X-PoW-Nonce": nonce,
+      "X-PoW-Difficulty": String(ch.difficulty),
+    };
+  }
+
+  return { headers };
+})();
+
 const form = $("#search-form");
 const fromInput = $("#from");
 const toInput = $("#to");
@@ -599,7 +643,13 @@ async function search(timeShiftMin = 0) {
   if (selectedCards.size) params.set("cards", [...selectedCards].join(","));
 
   try {
-    const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`);
+    let headers = {};
+    try {
+      headers = await PoW.headers();
+    } catch (e) {
+      // PoW échoue = pas de requête
+    }
+    const res = await fetch(`${API_BASE}/v1/journeys?${params.toString()}`, { headers });
     const body = await res.json();
     if (!res.ok) {
       const err = body.error || {};

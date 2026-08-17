@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 
-from src.api import app
+from src.api import app, _pow
 
 DATE = "2026-08-10"
 DATE_YM = 20260810
@@ -27,6 +27,7 @@ class ApiTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        _pow.enabled = False
 
     # ---------------------------------------------------------------- health
     def test_health(self):
@@ -537,6 +538,7 @@ class WebTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        _pow.enabled = False
 
     def test_page_daccueil_servie(self):
         r = self.client.get("/")
