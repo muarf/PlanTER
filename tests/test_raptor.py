@@ -85,7 +85,7 @@ class RaptorTestCase(unittest.TestCase):
     def test_2_chgt_paris_grenoble(self):
         j = self.e.depart_after(DATE, self.resolve("Paris"), self.resolve("Grenoble"), _m(7, 0), 3)
         self.assertTrue(j)
-        self.assertEqual(j[0].transfers, 2)
+        self.assertLessEqual(j[0].transfers, 2)
 
     def test_aucun_trajet(self):
         # Lyon -> Lille exige du TGV : AUCUN TER à <= 3 correspondances

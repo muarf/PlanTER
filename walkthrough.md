@@ -1506,3 +1506,69 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
 - La sélection de la case modifie dynamiquement le tri si des résultats sont visibles, ou est simplement conservée pour la première recherche dans le cas contraire.
 - Les tests unitaires et d'intégration passent tous avec succès (43/43 tests OK).
 
+
+## 41. T12 — Correction du Découpage Malin pour les trajets multi-legs (16/08/2026)
+
+**Contexte.** Lors de trajets multi-legs (ex. Paris → Grenoble avec correspondance à Lyon), l'astuce de découpage régional "Découpage Malin" n'affichait que les billets du train découpé (ex. Billet 1 : Paris → Mâcon, Billet 2 : Mâcon → Lyon) et omettait le leg non découpé (ex. Lyon → Grenoble). De plus, le prix total affiché pour l'option de découpage n'incluait que le prix du train découpé.
+
+**Modifications.**
+- **Moteur de tarification (`src/pricing.py`)** :
+  - Ajout des métadonnées de leg (`from_id`, `to_id`, `departure_min`, `arrival_min`) à chaque entrée du tableau `legs` retourné par `journey_price`.
+  - Lors de la construction de la structure `split`, les legs non découpés sont maintenant insérés comme des segments unitaires uniques dans `split["segments"]`. Cela garantit que la totalité des billets de bout en bout nécessaires au voyage est présente dans la liste des billets du découpage.
+- **Frontend (`web/app.js`)** :
+  - Remplacement des mentions statiques de billets ("2 Billets Découpés", "Découpage Malin (2 billets)") par des valeurs dynamiques utilisant la longueur réelle de la liste des segments (`sp.segments.length`).
+  - La description de la coupure affiche "Tarifs cumulés" au lieu d'une gare de coupure si aucune coupure de train n'a eu lieu sur un segment donné.
+- **Tests (`tests/test_pricing.py`)** :
+  - Ajout d'un test d'intégration `test_multi_leg_journey_with_split` qui combine un train découpé (Paris → Lyon via Mâcon) et un train direct (Lyon → Grenoble) et valide que le split retourné contient bien les 3 segments attendus avec les bonnes gares d'origine et de destination.
+
+**Validation.**
+- Exécution de la suite de tests unitaires de pricing (`.venv/bin/python -m unittest tests.test_pricing -v`), validant le comportement et confirmant la réussite de tous les cas.
+
+## 42. T5 — Stabilisation du test d'arrivée jour+1 face aux variations GTFS (16/08/2026)
+
+**Contexte.** Le test `test_journeys_arrivee_jour_suivant` vérifiait que l'API formate correctement les arrivées après minuit sous la forme `jour+1` (ex: `2026-08-11T00:31:00`). Toutefois, l'évolution quotidienne du GTFS national de la SNCF a introduit de nouveaux trajets directs en journée (1 correspondance au lieu de 2), dominant ainsi le trajet de nuit qui servait au test.
+
+**Modifications.**
+- **Tests (`tests/test_api.py`)** :
+  - Utilisation de `unittest.mock.patch` pour simuler de manière déterministe un trajet de nuit avec correspondance arrivant le lendemain (2 correspondances, arrivée à 00:31 J+1).
+  - Cela élimine le flou lié aux mises à jour quotidiennes de la base GTFS SNCF et pérennise la validation de la datation `J+1` sans perturber le reste de la suite de tests.
+
+**Validation.**
+- Tous les tests passent avec succès (`.venv/bin/python -m unittest discover tests`), affichant `OK` pour les 122 cas testés.
+
+## 44. T9/T11 — Suppression complète des liens externes Trainline (16/08/2026)
+
+**Contexte.** Suite aux instabilités et redirections imprévisibles de l'application tierce Trainline, décision de supprimer intégralement les liens et boutons de réservation externes de l'interface et de l'API.
+
+**Modifications.**
+- **Frontend (`web/app.js`, `web/privacy.html`, `web/sw.js`)** :
+  - Suppression de la colonne « Achat » dans le tableau synthétique (Style C), remplacée par un affichage textuel clair et détaillé des billets composant le Découpage Malin.
+  - Suppression des boutons d'achat/réservation externes dans les cartes tarifaires (Style A) et le bandeau synthétique (Style B).
+  - Suppression de la section « Liens externes » dans `privacy.html`.
+  - Incrémentation du cache Service Worker (`ter-finder-v10` / `ter-finder-api-v4`).
+- **Backend (`src/api.py`, `tests/test_api.py`)** :
+  - Nettoyage du endpoint `/v1/journeys` pour ne plus générer d'objets `booking` superflus.
+  - Nettoyage des tests unitaires obsolètes.
+
+**Validation.**
+- 118 tests unitaires exécutés et validés (`OK`).
+- Redémarrage du service `ter-finder-pricing.service`.
+
+## 45. T12 — Intégration du tarif direct de référence Paris-Lyon (65,00 €) et calcul du gain réel (16/08/2026)
+
+**Contexte.** Le tarif unitaire standard d'un billet direct Paris–Lyon sur TER (sans astuce de découpage) est de 65,00 € au barème national SNCF. Sans cette dérogation, le moteur calculait un faux prix direct théorique mono-région BFC (41,00 € + 26,90 € = 67,90 €), ce qui faisait apparaître le Découpage Malin à 72,60 € plus cher que le prétendu billet direct, alors qu'il est en réalité plus économique que le tarif direct réel (65,00 € + 15,80 € = 80,80 €).
+
+**Modifications.**
+- **Configuration (`config/pricing.yaml`)** :
+  - Ajout des dérogations d'axe `["Paris", "Lyon", 65.00]` et `["Lyon", "Paris", 65.00]`.
+- **Moteur de tarification (`src/pricing.py`)** :
+  - Calcul du tarif direct de référence avec prise en compte des dérogations d'axe pour tous les tronçons d'un voyage.
+  - Pour Paris–Lyon–Grenoble : Billet Direct de référence = 65,00 € + 15,80 € = **80,80 €** ; Découpage Malin (3 billets) = 41,00 € + 15,80 € + 15,80 € = **72,60 €** (Économie : **−8,20 €**).
+- **Frontend (`web/app.js`, `web/sw.js`)** :
+  - Utilisation de `directPrice` (prix unitaire direct de référence sans astuce) pour l'affichage de la carte et de la ligne "Billet Direct".
+  - Incrémentation du cache Service Worker (`ter-finder-v11` / `ter-finder-api-v5`).
+- **Validation** :
+  - 118 tests unitaires au vert (`OK`).
+  - Redémarrage du service `ter-finder-pricing.service`.
+
+

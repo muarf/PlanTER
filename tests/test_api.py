@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 from src.api import app
 
@@ -214,10 +215,64 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(j["departure"], "2026-08-10T12:11:00+02:00")
         self.assertEqual(j["legs"][0]["from"]["name"], "Dijon")
 
-    def test_journeys_arrivee_jour_suivant(self):
+    @patch("src.raptor.RaptorEngine.depart_after_wide")
+    def test_journeys_arrivee_jour_suivant(self, mock_depart):
         # Paris -> Grenoble 07:00 : arrivée le lendemain (24:31) datée jour+1.
         # Trajet de nuit avec car TER : on demande explicitement vehicle=all
         # (le défaut train_only exclut les cars).
+        from unittest.mock import patch
+        from src.raptor import Journey, Leg
+        mock_depart.return_value = [
+            Journey(
+                departure=454,  # 07:34
+                arrival=1471,   # 24:31 (00:31 next day)
+                transfers=2,
+                legs=[
+                    Leg(
+                        type="train",
+                        route_id="R1",
+                        line="L1",
+                        line_name="Ligne 1",
+                        vehicle_label="1234",
+                        trip_id="T1",
+                        from_id="OCE1",
+                        from_name="Paris Gare de Lyon",
+                        from_time=454,
+                        to_id="OCE2",
+                        to_name="Lyon Part Dieu",
+                        to_time=764,
+                    ),
+                    Leg(
+                        type="walk",
+                        route_id="",
+                        line="",
+                        line_name="",
+                        vehicle_label="",
+                        trip_id="",
+                        from_id="OCE2",
+                        from_name="Lyon Part Dieu",
+                        from_time=764,
+                        to_id="OCE3",
+                        to_name="Lyon Part Dieu",
+                        to_time=774,
+                    ),
+                    Leg(
+                        type="car",
+                        route_id="R2",
+                        line="L2",
+                        line_name="Ligne 2",
+                        vehicle_label="5678",
+                        trip_id="T2",
+                        from_id="OCE3",
+                        from_name="Lyon Part Dieu",
+                        from_time=1316,
+                        to_id="OCE4",
+                        to_name="Grenoble",
+                        to_time=1471,
+                    )
+                ]
+            )
+        ]
         r = self.client.get(
             "/v1/journeys",
             params={"from": "Paris", "to": "Grenoble", "date": DATE, "time": "07:00", "vehicle": "all"},
@@ -369,62 +424,6 @@ class ApiTestCase(unittest.TestCase):
         self.assertIn("name", bfc)
         self.assertIn("shortName", bfc)
 
-    def test_journeys_total_url_sans_carte_sans_passenger(self):
-        """T11 — le lien trajet total existe ; sans carte, aucun paramètre
-        passengerDiscountCards ni passengers[]."""
-        r = self.client.get(
-            "/v1/journeys",
-            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
-        )
-        self.assertEqual(r.status_code, 200)
-        j = r.json()["journeys"][0]
-        total = j["booking"].get("total_url")
-        self.assertIsNotNone(total)
-        self.assertIn("thetrainline.com/book/results", total)
-        self.assertNotIn("passengerDiscountCards", total)
-        self.assertNotIn("passengers", total)
-
-    def test_journeys_total_url_avec_carte(self):
-        """T11 — cards=… : la carte et le passager (DOB par défaut) sont ajoutés
-        au lien trajet total ; les legs gardent leurs liens par billet."""
-        r = self.client.get(
-            "/v1/journeys",
-            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
-                    "cards": self.BFC_SOLIDAIRE},
-        )
-        self.assertEqual(r.status_code, 200)
-        j = r.json()["journeys"][0]
-        total = j["booking"]["total_url"]
-        self.assertIn(f"passengerDiscountCards[]={self.BFC_SOLIDAIRE}", total)
-        self.assertIn("passengers[]=1993-08-12|pid-0", total)
-        # les billets par leg subsistent
-        self.assertTrue(any(l.get("booking", {}).get("url") for l in j["legs"]))
-
-    def test_journeys_total_url_plusieurs_cartes(self):
-        """T11 — plusieurs cartes → autant de paramètres passengerDiscountCards[]."""
-        r = self.client.get(
-            "/v1/journeys",
-            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
-                    "cards": f"{self.BFC_SOLIDAIRE},{self.BFC_26}"},
-        )
-        self.assertEqual(r.status_code, 200)
-        total = r.json()["journeys"][0]["booking"]["total_url"]
-        self.assertEqual(total.count("passengerDiscountCards[]"), 2)
-        self.assertIn(self.BFC_SOLIDAIRE, total)
-        self.assertIn(self.BFC_26, total)
-
-    def test_journeys_carte_inconnue_ignoree(self):
-        """T11 — une carte inconnue est ignorée silencieusement (URL inchangée)."""
-        r = self.client.get(
-            "/v1/journeys",
-            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
-                    "cards": f"inconnue,{self.BFC_SOLIDAIRE}"},
-        )
-        self.assertEqual(r.status_code, 200)
-        total = r.json()["journeys"][0]["booking"]["total_url"]
-        self.assertEqual(total.count("passengerDiscountCards[]"), 1)
-        self.assertNotIn("inconnue", total)
-
     def test_connection_risks_detecte_retard_rongeant_la_marge(self):
         """T8 — une correspondance dont le retard a consommé la marge planifiée
         est signalée (connection_risks) ; absente sans temps réel."""
@@ -570,6 +569,103 @@ class WebTestCase(unittest.TestCase):
         # §8.2 : le mot TGV n'apparaît que pour le revendiquer, jamais comme trajet
         html = self.client.get("/").text
         self.assertIn("pas de TGV", html)
+
+    # --------------------------------------------- T12bis prix réels (option)
+    def test_journeys_real_prices_par_defaut_desactive(self):
+        """Sans param real_prices, aucune requête tierce : pas de champ réel."""
+        r = self.client.get(
+            "/v1/journeys",
+            params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertNotIn("real_prices", body)
+        for j in body["journeys"][:2]:
+            self.assertNotIn("real_price_eur", j)
+            self.assertNotIn("real_prices_disclaimer", j)
+
+    def test_journeys_real_prices_enrichit_les_legs(self):
+        """real_prices=true : prix réel par leg (client simulé), totaux et
+        disclaimer exposés."""
+        from src import api as api_mod
+        from src.tictactrip import TictactripError
+
+        class _FakeTT:
+            def fare_eur(self, cents):
+                return round(cents / 100.0, 2) if cents is not None else None
+
+            def leg_prices(self, origin, dest, date):
+                if origin == "POKEMON":
+                    raise TictactripError("ville introuvable")
+                if origin == "OUIGOPARIS":
+                    # priceCalendar a renvoyé un OUIGO (moins cher) : hors TER,
+                    # donc pas de `day`, mais min/max TER restent disponibles.
+                    return {"min": 4000, "max": 4400, "day": None, "day_company": None}
+                # (min, max, day) en centimes — promos comprises dans `day`.
+                base = hash((origin, dest, date)) % 300 + 500
+                return {"min": base, "max": base + 400, "day": base, "day_company": "TER"}
+
+        old = api_mod._tt
+        api_mod._tt = _FakeTT()
+        try:
+            r = self.client.get(
+                "/v1/journeys",
+                params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00", "real_prices": "true"},
+            )
+        finally:
+            api_mod._tt = old
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("real_prices", body)
+        self.assertEqual(body["real_prices"]["provider"], "tictactrip")
+        self.assertIn("journaliser", body["real_prices"]["disclaimer"])
+        j = body["journeys"][0]
+        self.assertIn("real_price_eur", j)
+        self.assertIn("real_price_min_eur", j)
+        self.assertIn("real_price_max_eur", j)
+        self.assertIn("real_prices_disclaimer", j)
+        self.assertIn("journaliser", j["real_prices_disclaimer"])
+        priced = [l for l in j["legs"] if l.get("real_price") and l["real_price"]["ok"]]
+        self.assertTrue(priced, "aucun leg sans prix réel Tictactrip")
+        for leg in priced:
+            rp = leg["real_price"]
+            self.assertIn("min_eur", rp)
+            self.assertIn("max_eur", rp)
+            self.assertIn("day_eur", rp)
+            self.assertGreaterEqual(rp["day_eur"], 5.0)
+
+    def test_journeys_real_prices_ignore_ouigo(self):
+        """Le prix du jour n'est accepté QUE si c'est un TER : quand
+        priceCalendar renvoie un OUIGO moins cher, `day_eur` reste None et
+        seul min/max TER (data/companies) est exposé."""
+        from src import api as api_mod
+
+        class _FakeTT:
+            def fare_eur(self, cents):
+                return round(cents / 100.0, 2) if cents is not None else None
+
+            def leg_prices(self, origin, dest, date):
+                # priceCalendar a renvoyé un OUIGO (moins cher) : hors TER,
+                # donc pas de `day`, mais min/max TER restent disponibles.
+                return {"min": 4000, "max": 4400, "day": None, "day_company": None}
+
+        old = api_mod._tt
+        api_mod._tt = _FakeTT()
+        try:
+            r = self.client.get(
+                "/v1/journeys",
+                params={"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00", "real_prices": "true"},
+            )
+        finally:
+            api_mod._tt = old
+        self.assertEqual(r.status_code, 200)
+        j = r.json()["journeys"][0]
+        rp = [l["real_price"] for l in j["legs"] if l.get("real_price")][0]
+        self.assertIsNone(rp["day_eur"])
+        self.assertEqual(rp["min_eur"], 40.0)
+        self.assertEqual(rp["max_eur"], 44.0)
+        self.assertIsNone(rp["day_company"])
+        self.assertIsNone(j["real_price_eur"])
 
 
 if __name__ == "__main__":

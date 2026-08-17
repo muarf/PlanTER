@@ -183,9 +183,17 @@ class Graph:
         if norm in aliases:
             group_key = aliases[norm]
             if norm in self.search_index:
-                return [self.search_index[norm][0]]
+                return list(self.search_index[norm])
             return list(self.place_groups.get(group_key, []))
+        if norm in self.search_index:
+            return list(self.search_index[norm])
         hits = self.find_stops(query)
+        if not hits:
+            return []
+        first_name = hits[0][1]
+        norm_first = normalize(first_name)
+        if norm_first in self.search_index:
+            return list(self.search_index[norm_first])
         return [idx for idx, _ in hits[:1]]
 
 

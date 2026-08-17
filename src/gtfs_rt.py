@@ -244,15 +244,21 @@ class RealtimeAlerts:
         return out
 
 
-def _tr(text: str, max_len: int = _MAX_ALERT_LEN) -> str:
+def _clean(text: str) -> str:
+    """Nettoie un texte GTFS-RT : balises retirées, entités HTML décodées,
+    espaces multiples aplatis. Le texte est conservé EN ENTIER (la troncature
+    d'affichage est faite côté client, avec un bouton « voir plus »)."""
     import html
     import re as _re
 
     text = _re.sub(r"<br\s*/?>", " ", text)
     text = _re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
-    text = _re.sub(r"\s+", " ", text).strip()
-    return text if len(text) <= max_len else text[: max_len - 1].rstrip() + "…"
+    return _re.sub(r"\s+", " ", text).strip()
+
+
+def _tr(text: str, max_len: int = _MAX_ALERT_LEN) -> str:
+    return _clean(text) if len(_clean(text)) <= max_len else _clean(text)[: max_len - 1].rstrip() + "…"
 
 
 def _fr(translations) -> Optional[str]:
@@ -302,7 +308,7 @@ def parse_service_alerts(payload: bytes, graph: Graph) -> RealtimeAlerts:
         alert = RealtimeAlert(
             id=entity.id,
             header=header,
-            description=_tr(_fr(sa.description_text) or ""),
+            description=_clean(_fr(sa.description_text) or ""),
             cause=_pb2.Alert.Cause.Name(sa.cause) if sa.cause else "",
             effect=_pb2.Alert.Effect.Name(sa.effect) if sa.effect else "",
         )

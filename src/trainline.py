@@ -69,25 +69,26 @@ def slug_for(stop_area_id: str) -> str | None:
 
 
 def booking_url(from_stop_area_id: str, to_stop_area_id: str, date: str, time_hhmm: str | None = None) -> str | None:
-    """URL Trainline pré-remplie (format URN loc, validé en HTTP), ou None si
-    l'une des gares n'est pas mappée.
+    """URL Trainline pré-remplie (format slug, accepté et fonctionnel sur Trainline),
+    ou None si l'une des gares n'est pas mappée.
 
     `date` au format « YYYY-MM-DD ». `time_hhmm` optionnel (ex. « 07:34 ») —
     remplacé par 12:00 s'il est absent.
     """
-    origin = loc_for(from_stop_area_id)
-    dest = loc_for(to_stop_area_id)
+    origin = slug_for(from_stop_area_id)
+    dest = slug_for(to_stop_area_id)
     if not origin or not dest:
-        return None
+        origin_loc = loc_for(from_stop_area_id)
+        dest_loc = loc_for(to_stop_area_id)
+        if not origin_loc or not dest_loc:
+            return None
+        origin = f"urn:trainline:generic:loc:{origin_loc}"
+        dest = f"urn:trainline:generic:loc:{dest_loc}"
     params = {
-        "journeySearchType": "single",
-        "origin": f"urn:trainline:generic:loc:{origin}",
-        "destination": f"urn:trainline:generic:loc:{dest}",
+        "origin": origin,
+        "destination": dest,
         "outwardDate": f"{date}T{time_hhmm}:00" if time_hhmm else f"{date}T12:00:00",
         "outwardDateType": "departAfter",
-        "selectedTab": "train",
-        "splitSave": "true",
         "lang": "fr",
-        "transportModes[]": "mixed",
     }
     return f"{BOOKING_BASE}?{urlencode(params)}"

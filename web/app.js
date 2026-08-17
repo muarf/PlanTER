@@ -229,23 +229,124 @@ function riskNote(j) {
     `${n > 1 ? ` et ${n - 1} autre(s)` : ""}. Retard déjà consommé sur la marge planifiée.</div>`;
 }
 
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* Longueur d'affichage avant repli (« … ») d'une alerte. */
+const ALERT_SHORT_LEN = 220;
+
+function alertDesc(a) {
+  const full = a.description || "";
+  if (full.length <= ALERT_SHORT_LEN) {
+    return `<p>${escHtml(full)}</p>`;
+  }
+  const cut = full.slice(0, ALERT_SHORT_LEN).replace(/\s+\S*$/, "");
+  return `<p>${escHtml(cut)}…</p>` +
+    `<span class="alert-more" role="button" tabindex="0" data-full="${escHtml(full)}">Voir plus</span>`;
+}
+
 function alertsNote(j) {
   if (!j.alerts || !j.alerts.length) return "";
   const head = j.alerts[0].header;
   const n = j.alerts.length;
-  return `<div class="connection-risk alert-note">⚠ Perturbation signalée : <strong>${head}</strong>` +
+  return `<div class="connection-risk alert-note">⚠ Perturbation signalée : <strong>${escHtml(head)}</strong>` +
     `${n > 1 ? ` (et ${n - 1} autre${n > 2 ? "s" : ""})` : ""}` +
     `<span class="alert-toggle" role="button" tabindex="0">Détail</span><div class="alert-details" hidden>` +
-    j.alerts.map((a) => `<div class="alert-item"><strong>${a.header}</strong><p>${a.description}</p></div>`).join("") +
+    j.alerts.map((a) => `<div class="alert-item"><strong>${escHtml(a.header)}</strong>${alertDesc(a)}</div>`).join("") +
     `</div></div>`;
 }
 
+let currentDetailJourney = null;
+
+/* --------------------------------------------------- ANALYSE INTELLIGENTE DES PRIX */
+function analyzePricing(j) {
+  const normalPrice = j.price_normal_eur;
+  const reducedPrice = j.price_reduced_eur;
+  const hasCards = reducedPrice != null && reducedPrice < normalPrice;
+  const cards = (j.pricing && j.pricing.cards) || [];
+
+  // Découpage régional
+  let split = null;
+  const sp = j.pricing && j.pricing.split;
+  if (sp) {
+    const segsSum = sp.segments.reduce((acc, s) => acc + (s.fare_reduced_eur || s.fare_eur), 0);
+    const singleTicket = sp.single_ticket_reduced_eur || sp.single_ticket_eur || normalPrice;
+    const savings = singleTicket ? singleTicket - segsSum : 0;
+    split = {
+      available: true,
+      profitable: savings > 0.5,
+      savingsEur: savings,
+      totalEur: segsSum,
+      singleTicketEur: singleTicket,
+      regions: sp.regions,
+      junctions: sp.junction_stations,
+      segments: sp.segments.map((s) => ({
+        region: s.gap ? "Interrégional" : s.region,
+        from: s.from.name,
+        to: s.to.name,
+        km: s.km,
+        fareEur: s.fare_eur,
+        fareReducedEur: s.fare_reduced_eur,
+        finalPrice: s.fare_reduced_eur || s.fare_eur,
+      }))
+    };
+  }
+
+  // Meilleur prix global
+  let bestPrice = reducedPrice || normalPrice || 0;
+  if (split && split.profitable && split.totalEur < bestPrice) {
+    bestPrice = split.totalEur;
+  }
+
+  const directPrice = sp
+    ? (hasCards ? (sp.single_ticket_reduced_eur || sp.single_ticket_eur) : sp.single_ticket_eur)
+    : (hasCards ? reducedPrice : normalPrice);
+  const directNormalPrice = sp ? sp.single_ticket_eur : normalPrice;
+
+  return {
+    normalPrice,
+    reducedPrice,
+    directPrice: directPrice || normalPrice,
+    directNormalPrice: directNormalPrice || normalPrice,
+    hasCards,
+    cards,
+    bestPrice,
+    split,
+    rule: j.pricing ? (j.pricing.split ? "Découpage interrégional" : j.pricing.rule) : "Standard",
+    legs: (j.pricing && j.pricing.legs) || []
+  };
+}
+
+function fmtPrice(eur) {
+  if (eur == null) return "—";
+  return eur.toFixed(2).replace(".", ",") + " €";
+}
+
+function priceChip(j) {
+  const p = analyzePricing(j);
+  if (!p.normalPrice && !p.bestPrice) return "";
+
+  let chips = [];
+  if (p.hasCards) {
+    chips.push(`<span class="price-chip" title="Tarif avec vos cartes"><s>${fmtPrice(p.directNormalPrice)}</s> <strong>${fmtPrice(p.bestPrice)}</strong></span>`);
+  } else if (p.split && p.split.profitable) {
+    chips.push(`<span class="price-chip price-chip-split" title="Découpage avantageux">✂️ Astuce ${fmtPrice(p.split.totalEur)} <span class="price-promo">−${fmtPrice(p.split.savingsEur)}</span></span>`);
+  } else if (p.normalPrice) {
+    chips.push(`<span class="price-chip" title="Plein tarif estimé">≈ ${fmtPrice(p.normalPrice)}</span>`);
+  }
+
+  return chips.join(" ");
+}
+
+/* --------------------------------------------------- LISTE DES RÉSULTATS */
 function renderJourneys(journeys) {
   resultsSection.removeAttribute("hidden");
   journeysList.innerHTML = "";
   noResults.toggleAttribute("hidden", journeys.length > 0);
 
-  journeys.forEach((j, idx) => {
+  journeys.forEach((j) => {
     const li = document.createElement("li");
     const btn = document.createElement("button");
     btn.className = "journey";
@@ -253,6 +354,7 @@ function renderJourneys(journeys) {
     const lines = [...new Set(j.legs.filter((l) => l.type !== "walk").map((l) => l.line))].join(" + ");
     const badges = j.legs.map(legBadge).join("");
     const delays = j.legs.map(delayBadge).join("");
+
     btn.innerHTML = `
       <div class="journey-head">
         <span class="journey-times">${fmtTime(j.departure)} → ${fmtTime(j.arrival)}</span>
@@ -261,12 +363,11 @@ function renderJourneys(journeys) {
       </div>
       <div class="journey-meta">
         Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
-        · ${j.transfers} correspondance(s) · ${lines}${badges}
-        ${priceChip(j)}
+        · ${j.transfers === 0 ? "Direct" : `${j.transfers} correspondance(s)`} · ${lines}${badges}
+        <div style="margin-top: 0.35rem;">${priceChip(j)}</div>
       </div>
       ${riskNote(j)}
       ${alertsNote(j)}
-      ${ticketLinks(j)}
     `;
     btn.addEventListener("click", () => showDetail(j, true));
     li.appendChild(btn);
@@ -274,121 +375,181 @@ function renderJourneys(journeys) {
   });
 }
 
-/* T12 — prix estimé (modèle v1) : affiché comme une estimation, jamais comme
-   un tarif officiel. */
-function fmtPrice(eur) {
-  return eur.toFixed(2).replace(".", ",") + " €";
+/* --------------------------------------------------- TIMELINE ÉPURÉE */
+function renderTimelineModern(j) {
+  let html = `<ul class="timeline-modern">`;
+  j.legs.forEach((leg, idx) => {
+    const isTrain = leg.type !== "walk";
+    const trainInfo = isTrain
+      ? `<div class="timeline-leg-details">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="timeline-train-badge">🚆 ${leg.line ? `TER ${leg.line}` : "TER"}${leg.line_name ? ` · ${leg.line_name}` : ""}</span>
+            ${leg.vehicle_label ? `<small style="color:var(--muted);">${leg.vehicle_label}</small>` : ""}
+          </div>
+          ${leg.delay_min ? `<div class="rt-delay" style="font-size:0.8rem; margin-top:0.2rem;">⚠️ Retard estimé : ${leg.delay_min} min</div>` : ""}
+        </div>`
+      : `<div class="timeline-leg-details" style="font-size:0.82rem; color:var(--muted);">🚶 Correspondance à pied (${leg.from.name} → ${leg.to.name})</div>`;
+
+    // Gare de départ
+    html += `
+      <li class="timeline-item">
+        <div class="timeline-dot station-dot"></div>
+        <div class="timeline-header-row">
+          <span class="timeline-time">${fmtTime(leg.from.time)}</span>
+          <span class="timeline-station-name">${escHtml(leg.from.name)}</span>
+          ${delayBadge(leg)}
+        </div>
+        ${trainInfo}
+      </li>
+    `;
+
+    // Si c'est la dernière arrivée du trajet
+    if (idx === j.legs.length - 1) {
+      html += `
+        <li class="timeline-item">
+          <div class="timeline-dot station-dot" style="border-color:#10b981; background:#10b981;"></div>
+          <div class="timeline-header-row">
+            <span class="timeline-time">${fmtTime(leg.to.time)}</span>
+            <span class="timeline-station-name">${escHtml(leg.to.name)}</span>
+          </div>
+        </li>
+      `;
+    } else {
+      // Correspondance intermédiaire
+      const nextLeg = j.legs[idx + 1];
+      const waitMin = Math.round((new Date(nextLeg.from.time) - new Date(leg.to.time)) / 60000);
+      html += `
+        <li class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-header-row">
+            <span class="timeline-time">${fmtTime(leg.to.time)}</span>
+            <span class="timeline-station-name">${escHtml(leg.to.name)}</span>
+          </div>
+          <div class="timeline-transfer-box">
+            <span>⏳ Correspondance : <strong>${waitMin > 0 ? `${waitMin} min` : "Changement immédiat"}</strong> à ${escHtml(leg.to.name)}</span>
+          </div>
+        </li>
+      `;
+    }
+  });
+  html += `</ul>`;
+  return html;
 }
 
-function priceChip(j) {
-  if (j.price_normal_eur == null) return "";
-  const title = "prix estimé";
-  if (j.price_reduced_eur != null && j.price_reduced_eur < j.price_normal_eur) {
-    return ` <span class="price-chip" title="${title}">≈ <s>${fmtPrice(j.price_normal_eur)}</s> ${fmtPrice(j.price_reduced_eur)}</span>`;
+/* --------------------------------------------------- ACCORDÉON DÉTAILS TECHNIQUES */
+function renderDetailsAccordion(j, p) {
+  const legRows = p.legs.map((l) => `
+    <div style="display:flex; justify-content:space-between; margin-bottom:0.25rem;">
+      <span><strong>${l.line || "Ligne"}</strong> (${l.from} → ${l.to}) · ${l.km} km · ${l.region}</span>
+      <span>${fmtPrice(l.fare_eur)}${l.fare_reduced_eur ? ` → ${fmtPrice(l.fare_reduced_eur)}` : ""}</span>
+    </div>
+  `).join("");
+
+  return `
+    <div class="details-accordion">
+      <button type="button" class="accordion-toggle" onclick="this.nextElementSibling.toggleAttribute('hidden'); this.querySelector('.arr').textContent = this.nextElementSibling.hasAttribute('hidden') ? '▼' : '▲';">
+        <span>🔍 Détails du calcul kilométrique & règles</span>
+        <span class="arr">▼</span>
+      </button>
+      <div class="accordion-content" hidden>
+        <div style="margin-bottom:0.5rem;"><strong>Règle appliquée :</strong> ${p.rule}</div>
+        ${legRows}
+        ${j.pricing && j.pricing.note ? `<div style="margin-top:0.4rem; font-style:italic;">${escHtml(j.pricing.note)}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+/* --------------------------------------------------- RENDUS DES 3 STYLES */
+
+// STYLE A : CARTES COMPARATIVES ÉPURÉES
+function renderStyleA(j, p) {
+  let cardsHtml = `<div class="pricing-cards-section">
+    <div class="pricing-section-title">💳 Options tarifaires estimées</div>
+    <div class="pricing-cards-grid">`;
+
+  // Carte 1 : Billet Direct (Plein Tarif ou Tarif Réduit Carte)
+  const isDirectCheapest = !p.split || !p.split.profitable;
+  const directPrice = p.directPrice;
+  cardsHtml += `
+    <div class="pricing-card ${isDirectCheapest ? "featured" : ""}">
+      <div>
+        <div class="pricing-card-header">
+          <span class="pricing-card-tag">${p.hasCards ? "Tarif Carte" : "Plein Tarif"}</span>
+          ${isDirectCheapest ? '<span class="pricing-card-savings">Recommandé</span>' : ""}
+        </div>
+        <div class="pricing-card-title">Billet Direct</div>
+        <div class="pricing-card-desc">1 seul billet pour l'ensemble du voyage</div>
+        <div class="pricing-card-price">
+          ${fmtPrice(directPrice)}
+          ${p.hasCards ? `<small><s>${fmtPrice(p.directNormalPrice)}</s></small>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Carte 2 : Astuce Découpage Malin (si disponible)
+  if (p.split) {
+    const sp = p.split;
+    cardsHtml += `
+      <div class="pricing-card ${sp.profitable ? "featured" : ""}">
+        <div>
+          <div class="pricing-card-header">
+            <span class="pricing-card-tag">✂️ Découpage Malin</span>
+            ${sp.profitable ? `<span class="pricing-card-savings">Économie −${fmtPrice(sp.savingsEur)}</span>` : ""}
+          </div>
+          <div class="pricing-card-title">${sp.segments.length} Billet${sp.segments.length > 1 ? "s" : ""} Découpé${sp.segments.length > 1 ? "s" : ""}</div>
+          <div class="pricing-card-desc">${sp.junctions.length > 0 ? `Changement tarifaire à ${sp.junctions.join(" / ")}` : "Tarifs cumulés"}</div>
+          <div class="pricing-card-price">
+            ${fmtPrice(sp.totalEur)}
+            ${sp.singleTicketEur ? `<small><s>${fmtPrice(sp.singleTicketEur)}</s></small>` : ""}
+          </div>
+          <ul class="pricing-card-steps">
+            ${sp.segments.map((seg, i) => `
+              <li>
+                <span>${i + 1}. ${seg.from} → ${seg.to}</span>
+                <strong>${fmtPrice(seg.finalPrice)}</strong>
+              </li>
+            `).join("")}
+          </ul>
+        </div>
+      </div>
+    `;
   }
-  return ` <span class="price-chip" title="${title}">≈ ${fmtPrice(j.price_normal_eur)}</span>`;
+
+  cardsHtml += `</div></div>`;
+
+  return `
+    ${cardsHtml}
+    <div style="font-weight:700; margin-top:1.25rem; font-size:0.95rem; color:#1e293b;">Itinéraire & Correspondances</div>
+    ${renderTimelineModern(j)}
+    ${renderDetailsAccordion(j, p)}
+  `;
 }
 
-function priceBlock(j) {
-  if (j.price_normal_eur == null || !j.pricing) return "";
-  const rows = j.pricing.legs
-    .map((l) => `<div class="price-leg"><span class="price-leg-line">${l.line}</span>
-      ${l.from && l.to ? `<span class="price-leg-cities">${l.from} → ${l.to}</span>` : ""}<span>${l.km} km</span>
-      <span class="price-leg-region">${l.region}</span>
-      <span class="price-leg-fare">${fmtPrice(l.fare_eur)}${l.fare_reduced_eur != null && l.fare_reduced_eur < l.fare_eur ? ` → ${fmtPrice(l.fare_reduced_eur)}` : ""}</span></div>`)
-    .join("");
-  const rule = j.pricing.split
-    ? "billets découpés par région, sommé"
-    : j.pricing.rule === "mono_region"
-      ? "un seul billet dégressif sur la distance totale"
-      : "un billet par tronçon, sommé";
-  const cards = (j.pricing.cards || [])
-    .map((c) => `<span class="price-card">${c.shortName} (−${Math.round((1 - c.pay) * 100)} %)</span>`)
-    .join("");
-  const reduced = (j.price_reduced_eur != null && j.price_reduced_eur < j.price_normal_eur)
-    ? `<div class="price-reduced">Tarif réduit : ≈ <strong>${fmtPrice(j.price_reduced_eur)}</strong> ${cards}</div>`
-    : "";
-  /* §32 — un même train traversant plusieurs régions : on annonce la coupure
-     (billet par segment régional) et le prix découpé, avec le lien de
-     réservation par segment (la carte de la région du segment y est ajoutée). */
-  let splitBlock = "";
-  const sp = j.pricing.split;
-  if (sp) {
-    const gap = sp.segments.find((s) => s.gap);
-    const segs = sp.segments
-      .map((s) => `<div class="price-leg split-seg"><span class="price-leg-line">${s.gap ? "Interrégional (plein tarif)" : s.region}</span>
-        <span>${s.from.name} → ${s.to.name} · ${s.km} km</span>
-        <span class="price-leg-region">${fmtPrice(s.fare_eur)}${s.fare_reduced_eur < s.fare_eur ? ` → ${fmtPrice(s.fare_reduced_eur)}` : ""}</span>
-        ${s.booking && s.booking.url ? ` <a class="ticket-chip" href="${s.booking.url}" target="_blank" rel="noopener noreferrer">Réserver</a>` : ""}</div>`)
-      .join("");
-    const announce = gap
-      ? `Ce train traverse ${sp.regions.join(" et ")} : pas d'accord tarifaire entre les régions, il faut un plein tarif entre ${gap.from.name} et ${gap.to.name} puis la carte de la région suivante.`
-      : `Ce train traverse ${sp.regions.join(" et ")} : pour utiliser la carte de chaque région, découpez le billet à ${sp.junction_stations.join(" / ")}.`;
-    splitBlock = `<div class="price-detail split-note">
-      <div class="price-rule">${announce}</div>
-      ${segs}
-      ${sp.single_ticket_eur != null ? `<div class="price-rule">Billet unique (si vendu en une fois) : ≈ ${fmtPrice(sp.single_ticket_eur)}${sp.single_ticket_reduced_eur < sp.single_ticket_eur ? ` → ${fmtPrice(sp.single_ticket_reduced_eur)}` : ""}</div>` : ""}
-      <div class="price-split-total">Total billets découpés : ≈ <strong>${fmtPrice(sp.price_reduced_split_eur)}</strong> (plein tarif ${fmtPrice(sp.price_split_eur)})</div>
-    </div>`;
-  }
-  return `<div class="price-note">
-    <strong>Prix estimé : ≈ ${fmtPrice(j.price_normal_eur)}</strong>
-    ${reduced}
-    <div class="price-detail">${rows}<div class="price-rule">Règle : ${rule}.</div></div>
-    ${splitBlock}
-  </div>`;
-}
-
-/* T11 — lien Trainline « Réserver le trajet » (total) + billets par leg.
-   La logique des cartes (backend, param cards=) est conservée pour plus tard. */
-function ticketLinks(j) {
-  if (!j.booking || !j.booking.tickets) return "";
-  const total = j.booking.total_url
-    ? `<a class="ticket-chip ticket-total" href="${j.booking.total_url}" target="_blank" rel="noopener noreferrer">Réserver le trajet (Trainline)</a>`
-    : "";
-  const legs = j.legs.filter((l) => l.booking && l.booking.url)
-    .map((l) => `<a class="ticket-chip" href="${l.booking.url}" target="_blank" rel="noopener noreferrer">Billet ${l.line || "trajet"} · Trainline</a>`)
-    .join("");
-  return `<div class="ticket-links">${total}${legs}</div>`;
-}
-
-/* ------------------------------------------------------------------- détail */
+/* --------------------------------------------------- VUE DÉTAIL DU TRAJET */
 function showDetail(j, withAlternative) {
+  currentDetailJourney = j;
+  const p = analyzePricing(j);
+
   const alt = (withAlternative && j.connection_risks && j.connection_risks.length)
     ? `<button type="button" class="alt-button" id="alt-button">Voir une alternative plus tard (+30 min)</button>`
     : "";
-  detailBody.innerHTML = `<div class="journey-head">
+
+  const styleContent = renderStyleA(j, p);
+
+  detailBody.innerHTML = `
+    <div class="journey-head">
       <span class="journey-times">${fmtTime(j.departure)} → ${fmtTime(j.arrival)}</span>
       ${nextDay(j.arrival) ? '<span class="badge badge-next-day">+1j</span>' : ""}
-      ${priceChip(j)}
     </div>
     <p class="journey-meta">Durée ${Math.floor(j.duration_min / 60)}h${String(j.duration_min % 60).padStart(2, "0")}
-      · ${j.transfers} correspondance(s)</p>
+      · ${j.transfers === 0 ? "Direct" : `${j.transfers} correspondance(s)`}</p>
     ${riskNote(j)}
     ${alertsNote(j)}
-    ${priceBlock(j)}
     ${alt}
-    <ol class="timeline"></ol>`;
-  const timeline = detailBody.querySelector(".timeline");
-
-  j.legs.forEach((leg) => {
-    const li = document.createElement("li");
-    const info = leg.type === "walk"
-      ? `Marche ${leg.from.name} → ${leg.to.name}`
-      : `${legBadge(leg)} Ligne ${leg.line}${leg.line_name ? " — " + leg.line_name : ""}` +
-        (leg.vehicle_label ? ` · ${leg.vehicle_label}` : "") +
-        (leg.delay_min ? ` · <strong class="rt-delay">retard ${leg.delay_min} min</strong>` : "");
-    const buy = (leg.booking && leg.booking.url)
-      ? ` <a class="ticket-chip" href="${leg.booking.url}" target="_blank" rel="noopener noreferrer">Acheter ce billet (Trainline)</a>`
-      : "";
-    li.innerHTML = `<div class="time">${fmtTime(leg.from.time)}${delayBadge(leg)}</div>
-      <div><span class="station">${leg.from.name}</span><div class="leg-info">${info}${buy}</div></div>`;
-    timeline.appendChild(li);
-    const li2 = document.createElement("li");
-    li2.innerHTML = `<div class="time">${fmtTime(leg.to.time)}</div>
-      <div><span class="station">${leg.to.name}</span></div>`;
-    timeline.appendChild(li2);
-  });
+    ${styleContent}
+  `;
 
   const altBtn = detailBody.querySelector("#alt-button");
   if (altBtn) {
@@ -401,6 +562,7 @@ function showDetail(j, withAlternative) {
 }
 
 $("#detail-back").addEventListener("click", () => {
+  currentDetailJourney = null;
   detailSection.setAttribute("hidden", "");
   resultsSection.removeAttribute("hidden");
 });
@@ -433,7 +595,7 @@ async function search(timeShiftMin = 0) {
   if (prioritizeFewerTransfers) {
     params.set("prioritize_fewer_transfers", "true");
   }
-  
+
   if (selectedCards.size) params.set("cards", [...selectedCards].join(","));
 
   try {
@@ -496,6 +658,7 @@ prioritizeFewerTransfersCheckbox.addEventListener("change", (e) => {
   }
 });
 
+
 form.addEventListener("submit", (e) => {
   e.preventDefault();
   search();
@@ -527,4 +690,15 @@ document.addEventListener("click", (ev) => {
   const box = t.nextElementSibling;
   box.toggleAttribute("hidden");
   t.textContent = box.hidden ? "Détail" : "Masquer";
+});
+
+/* T13 — « Voir plus » : remplace le texte tronqué (… ) par le texte complet
+   de l'alerte, puis retire le bouton. */
+document.addEventListener("click", (ev) => {
+  const m = ev.target.closest(".alert-more");
+  if (!m) return;
+  ev.stopPropagation();
+  const p = m.previousElementSibling;
+  if (p) p.textContent = m.dataset.full;
+  m.remove();
 });

@@ -39,6 +39,8 @@ from src import trainline_cards
 if TYPE_CHECKING:
     from src.graph import Graph
 
+from src.graph import normalize
+
 ROOT = Path(__file__).resolve().parents[1]
 PRICING_FILE = ROOT / "config" / "pricing.yaml"
 REGIONS_FILE = ROOT / "config" / "station_regions.json"
@@ -80,6 +82,11 @@ class PricingEngine:
         for a, b, rule in cfg.get("cross_region_rules", []):
             self._cross_rules[(a, b)] = rule
             self._cross_rules[(b, a)] = rule
+        self._axis_exceptions: dict[tuple[str, str], float] = {}
+        for item in cfg.get("axis_exceptions", []):
+            if len(item) == 3:
+                o, d, p = item
+                self._axis_exceptions[(normalize(o), normalize(d))] = float(p)
         self._stations = json.loads(regions.read_text(encoding="utf-8"))
         self._stop_region: dict[int, str] = {}
         self._trip_region: dict[int, str] = {}
@@ -91,41 +98,78 @@ class PricingEngine:
     def _load_cards(self, ccfg: dict) -> None:
         self.card_default_pay = float(ccfg.get("default_pay", 0.50))
         self._no_discount_prefixes = tuple(str(p).lower() for p in ccfg.get("no_discount_prefixes", []))
-        self._pay_patterns = [(str(p["contains"]).lower(), float(p["pay"])) for p in ccfg.get("pay_patterns", [])]
+        self._pay_patterns = [
+            (
+                str(p["contains"]).lower(),
+                float(p["pay"]) if "pay" in p else None,
+                float(p["pay_we"]) if "pay_we" in p else None,
+                float(p["pay_wd"]) if "pay_wd" in p else None,
+            )
+            for p in ccfg.get("pay_patterns", [])
+        ]
         self._card_by_id = ccfg.get("by_id", {})
         self._region_keywords = [(str(k["contains"]).lower(), k["region"]) for k in ccfg.get("region_keywords", [])]
 
     def card_info(self, card: dict) -> dict:
-        """pay (fraction du plein tarif PAYÉE, None si aucune réduction par
-        billet) et région d'application d'une carte TER (config/trainline_cards)."""
+        """pay/pay_we/pay_wd (fraction du plein tarif PAYÉE, None si aucune
+        réduction par billet) et région d'application d'une carte TER."""
         cid = card["id"]
         if cid not in self._card_info:
             name = card.get("name", "")
             low = name.lower()
             pay: float | None = None
+            pay_we: float | None = None
+            pay_wd: float | None = None
             if not any(low.startswith(pref) for pref in self._no_discount_prefixes):
                 ov = self._card_by_id.get(cid)
                 if ov is not None:
-                    pay = None if ov.get("type") == "none" else float(ov.get("pay", self.card_default_pay))
+                    tp = ov.get("type")
+                    if tp == "none":
+                        pay = None
+                    else:
+                        pay = float(ov.get("pay", self.card_default_pay)) if "pay" in ov else None
+                        pay_we = float(ov["pay_we"]) if "pay_we" in ov else None
+                        pay_wd = float(ov["pay_wd"]) if "pay_wd" in ov else None
+                        if pay is None and pay_we is None and pay_wd is None:
+                            pay = self.card_default_pay
                 else:
-                    for contains, p in self._pay_patterns:
+                    for contains, p, pwe, pwd in self._pay_patterns:
                         if contains in low:
                             pay = p
+                            pay_we = pwe
+                            pay_wd = pwd
                             break
-                    if pay is None:
+                    if pay is None and pay_we is None and pay_wd is None:
                         pay = self.card_default_pay
             region = "INCONNUE"
             for contains, r in self._region_keywords:
                 if contains in low:
                     region = r
                     break
-            self._card_info[cid] = {"pay": pay, "region": region}
+            self._card_info[cid] = {"pay": pay, "pay_we": pay_we, "pay_wd": pay_wd, "region": region}
         return self._card_info[cid]
+
+    @staticmethod
+    def _resolve_pay(info: dict, is_weekend: bool) -> float | None:
+        """Résout le pay effectif selon le jour (week-end = samedi/dimanche)."""
+        if is_weekend and info["pay_we"] is not None:
+            return info["pay_we"]
+        if not is_weekend and info["pay_wd"] is not None:
+            return info["pay_wd"]
+        return info["pay"]
 
     @staticmethod
     def _discount(eur: float, pay: float) -> float:
         """Prix réduit d'un billet plein tarif (arrondi aux 5 centimes)."""
         return round(round(eur * pay / 0.05) * 0.05, 2)
+
+    def _axis_price(self, from_name: str, to_name: str) -> float | None:
+        fn = normalize(from_name)
+        tn = normalize(to_name)
+        for (o, d), p in self._axis_exceptions.items():
+            if (o in fn and d in tn) or (d in fn and o in tn):
+                return p
+        return None
 
     # ------------------------------------------------------ région d'un arrêt
     def _uic(self, stop_idx: int) -> str | None:
@@ -336,13 +380,14 @@ class PricingEngine:
         return fare, red
 
     # ------------------------------------------------------------- trajet
-    def journey_price(self, journey, cards: list[str] | None = None) -> dict | None:
+    def journey_price(self, journey, cards: list[str] | None = None, date=None) -> dict | None:
         """Prix estimé d'un trajet (legs ferroviaires uniquement).
 
         `cards` : ids Trainline (config/trainline_cards.json) des cartes de
-        réduction à appliquer. La réduction d'une carte ne vaut que pour les
-        segments de sa région ; parmi plusieurs cartes, la plus avantageuse
-        s'applique. Retourne None si le trajet n'a aucun leg ferroviaire.
+        réduction à appliquer. `date` : objet date pour le choix pay_we/pay_wd.
+        La réduction d'une carte ne vaut que pour les segments de sa région ;
+        parmi plusieurs cartes, la plus avantageuse s'applique. Retourne None
+        si le trajet n'a aucun leg ferroviaire.
         """
         rail = [l for l in journey.legs if l.type != "walk"]
         if not rail:
@@ -372,6 +417,10 @@ class PricingEngine:
                 "to": self.graph.stops[alight].name,
                 "km": round(km, 1),
                 "region": region,
+                "from_id": leg.from_id,
+                "to_id": leg.to_id,
+                "departure_min": leg.from_time,
+                "arrival_min": leg.to_time,
             }
             # §32 — un même train traversant plusieurs régions : on annonce le
             # découpage (billet par segment régional) sans changer le prix
@@ -385,15 +434,22 @@ class PricingEngine:
         rule = "mono_region" if len(regions) == 1 else "pluri_region"
         if rule == "mono_region":
             region = legs[0]["region"]
-            total_eur = self.fare(total_km, region)
+            axis_p = self._axis_price(legs[0]["from"], legs[0]["to"]) if len(legs) == 1 else None
+            total_eur = axis_p if axis_p is not None else self.fare(total_km, region)
         else:
-            total_eur = round(sum(self.fare(jl["km"], jl["region"]) for jl in legs), 2)
+            total_eur = 0.0
+            for jl in legs:
+                axis_p = self._axis_price(jl.get("from", ""), jl.get("to", ""))
+                fare = axis_p if axis_p is not None else self.fare(jl["km"], jl["region"])
+                total_eur += fare
+            total_eur = round(total_eur, 2)
 
         # Cartes de réduction : meilleure réduction par région, appliquée sur
         # le billet global (mono-région) ou sur chaque billet de tronçon. Une
         # carte n'est listée que si sa région d'application figure au trajet :
         # région majoritaire d'un train OU région traversée par un train
         # découpé en segments (§32).
+        is_weekend = date.weekday() >= 5 if date is not None else False
         applied: list[dict] = []
         pay_by_region: dict[str, float] = {}
         for cid in cards or []:
@@ -401,16 +457,17 @@ class PricingEngine:
             if card is None:
                 continue
             info = self.card_info(card)
-            if info["pay"] is None or info["region"] not in card_regions:
+            pay = self._resolve_pay(info, is_weekend)
+            if pay is None or info["region"] not in card_regions:
                 continue
             applied.append({
                 "id": cid, "name": card.get("name", cid),
                 "shortName": card.get("shortName", card.get("name", cid)),
-                "region": info["region"], "pay": info["pay"],
+                "region": info["region"], "pay": pay,
             })
             r = info["region"]
-            if r not in pay_by_region or info["pay"] < pay_by_region[r]:
-                pay_by_region[r] = info["pay"]
+            if r not in pay_by_region or pay < pay_by_region[r]:
+                pay_by_region[r] = pay
 
         if rule == "mono_region":
             pay = pay_by_region.get(legs[0]["region"])
@@ -418,20 +475,41 @@ class PricingEngine:
         else:
             reduced = 0.0
             for jl in legs:
-                fare = self.fare(jl["km"], jl["region"])
+                axis_p = self._axis_price(jl.get("from", ""), jl.get("to", ""))
+                fare = axis_p if axis_p is not None else self.fare(jl["km"], jl["region"])
                 pay = pay_by_region.get(jl["region"])
                 reduced += self._discount(fare, pay) if pay is not None else fare
             price_reduced_eur = round(reduced, 2)
 
         # Référence « billet unique » (mono/pluri), conservée dans split pour
-        # l'affichage ; quand un train est découpé, le prix affiché devient le
-        # total des billets découpés (le billet unique n'est pas vendable).
+        # l'affichage et la comparaison d'économie.
         single_full = total_eur
         single_reduced = price_reduced_eur
 
+        # Prix par tronçon pour l'affichage : un train découpé paie par
+        # segment régional, un train simple un billet unitaire sur sa distance.
+        for jl in legs:
+            segs = jl.get("segments")
+            if segs:
+                f = fr = 0.0
+                for s in segs:
+                    fare, red = self._segment_price(s, pay_by_region)
+                    s["fare_eur"] = fare
+                    s["fare_reduced_eur"] = red
+                    f += fare
+                    fr += red
+                jl["fare_eur"] = round(f, 2)
+                jl["fare_reduced_eur"] = round(fr, 2)
+            else:
+                axis_p = self._axis_price(jl.get("from", ""), jl.get("to", ""))
+                fare = axis_p if axis_p is not None else self.fare(jl["km"], jl["region"])
+                pay = pay_by_region.get(jl["region"])
+                jl["fare_eur"] = fare
+                jl["fare_reduced_eur"] = self._discount(fare, pay) if pay is not None else fare
+
         # §32 — annonce du découpage intra-train : gares de jonction et
         # billetterie par segment régional (chaque segment tarifé avec la
-        # meilleure carte de sa région). `price_reduced_eur` reste inchangé.
+        # meilleure carte de sa région).
         split = None
         split_legs = [l for l in legs if l.get("segments")]
         if split_legs:
@@ -444,31 +522,33 @@ class PricingEngine:
                 segs = l.get("segments")
                 if segs:
                     for s in segs:
-                        # §33 — segment interrégional `gap` : plein tarif, aucune
-                        # carte ne s'applique (pas d'accord entre les régions) ;
-                        # tarif = moyenne des barèmes des deux régions (matrice).
-                        fare, red = self._segment_price(s, pay_by_region)
-                        segments_out.append({**s, "fare_eur": fare, "fare_reduced_eur": red})
-                        price_split += fare
-                        price_split_reduced += red
+                        segments_out.append(s)
+                        price_split += s["fare_eur"]
+                        price_split_reduced += s["fare_reduced_eur"]
                         if s["region"] not in split_regions:
                             split_regions.append(s["region"])
-                    # gare(s) de coupure : uniquement pour des billets contigus ;
-                    # en présence d'un segment `gap`, l'annonce passe par les gares
-                    # frontières du segment plein tarif (§33).
                     if not any(s.get("gap") for s in segs):
                         for i in range(len(segs) - 1):
                             junction = segs[i]["to"]["name"]
                             if junction not in junction_stations:
                                 junction_stations.append(junction)
                 else:
-                    # leg simple (train sans découpage intra-train) : son billet
-                    # unitaire entre en compte dans le total découpé.
-                    fare = self.fare(l["km"], l["region"])
-                    pay = pay_by_region.get(l["region"])
-                    red = self._discount(fare, pay) if pay is not None else fare
-                    price_split += fare
-                    price_split_reduced += red
+                    # Leg non découpé : on l'ajoute comme segment unique
+                    # pour que l'itinéraire complet soit affiché.
+                    s = {
+                        "region": l["region"],
+                        "from": {"stop_area_id": l["from_id"], "name": l["from"]},
+                        "to": {"stop_area_id": l["to_id"], "name": l["to"]},
+                        "km": l["km"],
+                        "departure_min": l["departure_min"],
+                        "arrival_min": l["arrival_min"],
+                        "fare_eur": l["fare_eur"],
+                        "fare_reduced_eur": l["fare_reduced_eur"],
+                    }
+                    segments_out.append(s)
+                    price_split += l["fare_eur"]
+                    price_split_reduced += l["fare_reduced_eur"]
+
             split = {
                 "junction_stations": junction_stations,
                 "regions": split_regions,
@@ -478,28 +558,8 @@ class PricingEngine:
                 "single_ticket_eur": round(single_full, 2),
                 "single_ticket_reduced_eur": round(single_reduced, 2),
             }
-
-        # Prix par tronçon pour l'affichage : un train découpé paie par
-        # segment régional, un train simple un billet unitaire sur sa distance.
-        for jl in legs:
-            segs = jl.get("segments")
-            if segs:
-                f = fr = 0.0
-                for s in segs:
-                    fare, red = self._segment_price(s, pay_by_region)
-                    f += fare
-                    fr += red
-                jl["fare_eur"] = round(f, 2)
-                jl["fare_reduced_eur"] = round(fr, 2)
-            else:
-                fare = self.fare(jl["km"], jl["region"])
-                pay = pay_by_region.get(jl["region"])
-                jl["fare_eur"] = fare
-                jl["fare_reduced_eur"] = self._discount(fare, pay) if pay is not None else fare
-
-        if split is not None:
-            total_eur = split["price_split_eur"]
-            price_reduced_eur = split["price_reduced_split_eur"]
+            total_eur = round(price_split, 2)
+            price_reduced_eur = round(price_split_reduced, 2)
 
         return {
             "rule": rule,

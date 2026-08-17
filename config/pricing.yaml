@@ -150,6 +150,13 @@ regions:
 cross_region_rules:
   - [Auvergne-Rhône-Alpes, Provence-Alpes-Côte d'Azur, gap]
 
+# Tarifs d'axe dérogatoires (prix réels observés sur liaisons spécifiques)
+axis_exceptions:
+  - ["Lyon", "Grenoble", 15.80]
+  - ["Grenoble", "Lyon", 15.80]
+  - ["Paris", "Lyon", 65.00]
+  - ["Lyon", "Paris", 65.00]
+
 # T12 — Cartes de réduction TER (ESTIMATION v1).
 #
 # Pour chaque carte de config/trainline_cards.json, le moteur calcule la
@@ -158,8 +165,9 @@ cross_region_rules:
 # la carte (une carte HdF ne réduit pas un trajet normand).
 #
 # Les barèmes réels variant par région, période et heure (ex. week-end/semaine),
-# on retient une valeur REPRÉSENTATIVE documentée entre parenthèses. Ces taux
-# sont des ESTIMATIONS à valider, comme le prix plein.
+# certaines cartes supportent `pay_we` (samedi/dimanche) et `pay_wd` (lundi à
+# vendredi) en plus de `pay` (taux unique, fallback). Le choix est automatique
+# selon la date du trajet. Ces taux sont des ESTIMATIONS à valider.
 cards:
   # Carte de réduction régionale non répertoriée : -50 % (défaut prudent).
   default_pay: 0.50
@@ -181,13 +189,13 @@ cards:
     - {contains: "sénior",       pay: 0.50}
     - {contains: "senior",       pay: 0.50}
     - {contains: "études",       pay: 0.50}
-    - {contains: "26+",          pay: 0.40}   # BFC Mobigo+ : 60 % we / 30 % semaine
+    - {contains: "26+",          pay_we: 0.40, pay_wd: 0.70}  # BFC Mobigo+ : -60 % we / -30 % semaine
     - {contains: "fluo",         pay: 0.50}   # Grand Est Fluo (et Fluo Jeune) : -50 %
-    - {contains: "tempo",        pay: 0.40}   # Normandie Tempo : 50 % we / 25 % semaine
+    - {contains: "tempo",        pay_we: 0.50, pay_wd: 0.75}  # Normandie Tempo : -50 % we / -25 % semaine
     - {contains: "mezzo",        pay: 0.50}   # PDL mezzo / mezzo-26 : -50 %
-    - {contains: "liberto",      pay: 0.40}   # Occitanie LibertiO' : 50 % we / 30 % semaine
+    - {contains: "liberto",      pay_we: 0.50, pay_wd: 0.70}  # Occitanie LibertiO' : -50 % we / -30 % semaine
     - {contains: "illico mobilité", pay: 0.10}  # ARA illico MOBILITÉ : -90 %
-    - {contains: "illico liberté", pay: 0.50}   # ARA illico LIBERTÉ : -25 % sem / -50 % we
+    - {contains: "illico liberté", pay_we: 0.50, pay_wd: 0.75}  # ARA illico LIBERTÉ : -50 % we / -25 % semaine
     - {contains: "rémi",         pay: 0.50}   # Centre-Val de Loire Rémi (Liberté/Jeune/Sénior/Plus)
     - {contains: "carte +",      pay: 0.50}   # Nouvelle-Aquitaine Carte + : -50 %
     - {contains: "zou",          pay: 0.70}   # ZOU! : -30 % (jeunes/solidaire déjà matchés avant)
@@ -208,10 +216,12 @@ cards:
       pay: 0.25
     "solidario-occitanie":                         # Occitanie SolidariO' (id local, pas chez Trainline) : -75 %
       pay: 0.25
-    "3b2fb763e7cfadeee83c80dd503184c684f33ff6":   # Carte Normandie Tempo +26 : -25 % sem / -50 % we
-      pay: 0.50
-    "470ae6fd30e42fdf19ea56229115a9c83a669b01":   # Carte Normandie Tempo Paris +26 : -25 % sem / -50 % we
-      pay: 0.50
+    "3b2fb763e7cfadeee83c80dd503184c684f33ff6":   # Carte Normandie Tempo +26 : -50 % we / -25 % semaine
+      pay_we: 0.50
+      pay_wd: 0.75
+    "470ae6fd30e42fdf19ea56229115a9c83a669b01":   # Carte Normandie Tempo Paris +26 : -50 % we / -25 % semaine
+      pay_we: 0.50
+      pay_wd: 0.75
     "315a57d01f5e75c635231599b8795fc196b4671d":   # Carte Grand-Est Primo (abonnement, illimité) : sans %
       type: none
 

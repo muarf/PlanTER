@@ -193,11 +193,13 @@ class PricingTestCase(unittest.TestCase):
 
     # ------------------------------------------------------- cartes réductions
     def test_card_info_bfc(self):
-        # Carte BFC 26+ : -60% we / -30% semaine -> pay représentatif 0.40 ;
+        # Carte BFC 26+ : -60% we / -30% semaine -> pay_we=0.40, pay_wd=0.70 ;
         # carte solidaire BFC : -75% -> 0.25 (dérogation by_id).
         info = self.pe.card_info({"id": BFC_26, "name": "Carte Bourgogne-Franche-Comté 26+"})
         self.assertEqual(info["region"], "Bourgogne-Franche-Comté")
-        self.assertEqual(info["pay"], 0.4)
+        self.assertIsNone(info["pay"])
+        self.assertEqual(info["pay_we"], 0.4)
+        self.assertEqual(info["pay_wd"], 0.7)
         info_sol = self.pe.card_info({"id": BFC_SOLIDAIRE, "name": "Carte Bourgogne-Franche-Comté tarif réduit solidaire"})
         self.assertEqual(info_sol["pay"], 0.25)
 
@@ -346,8 +348,8 @@ class PricingTestCase(unittest.TestCase):
         # le billet unique dégressif est conservé en référence dans split.
         self.assertEqual(info["price_reduced_eur"], split["price_reduced_split_eur"])
         self.assertEqual(info["price_normal_eur"], split["price_split_eur"])
-        # la référence « billet unique » conserve le prix mono-région dégressif
-        self.assertEqual(split["single_ticket_eur"], self.pe.fare(info["km"], "Bourgogne-Franche-Comté"))
+        # la référence « billet unique » conserve le prix direct de référence (tarif d'axe 65 €)
+        self.assertEqual(split["single_ticket_eur"], 65.00)
         self.assertEqual(split["single_ticket_reduced_eur"], self.pe._discount(split["single_ticket_eur"], 0.25))
         # le découpage est annoncé même sans cartes (mais sans réduction)
         base = self.pe.journey_price(j)
@@ -456,6 +458,38 @@ class PricingTestCase(unittest.TestCase):
                     fare = pe.fare(km, "Pays de la Loire")
                     self.assertAlmostEqual(fare, 37.4, delta=1.0)
                     break
+
+    def test_multi_leg_journey_with_split(self):
+        # T12 — Trajet multi-legs où au moins un leg est split et l'autre non.
+        # Le split doit contenir la totalité des segments du trajet de bout en bout.
+        j_k7 = self._k7_0734()
+        self.assertIsNotNone(j_k7, "TER K7 07:34 introuvable")
+        leg1 = j_k7.legs[0]
+
+        js_lg = self.e.depart_after_wide(
+            DATE, self.resolve("Lyon Part Dieu"), self.resolve("Grenoble"),
+            13 * 60, 1, "train_only", None,
+        )
+        self.assertTrue(js_lg)
+        leg2 = js_lg[0].legs[0]
+
+        class FakeJourney:
+            def __init__(self, legs):
+                self.legs = legs
+
+        fj = FakeJourney([leg1, leg2])
+        info = self.pe.journey_price(fj)
+        self.assertIsNotNone(info)
+
+        split = info["split"]
+        self.assertIsNotNone(split)
+        self.assertEqual(len(split["segments"]), 3)
+        self.assertEqual(split["segments"][0]["from"]["name"], "Paris Gare de Lyon Hall 1 - 2")
+        self.assertEqual(split["segments"][0]["to"]["name"], "Mâcon")
+        self.assertEqual(split["segments"][1]["from"]["name"], "Mâcon")
+        self.assertEqual(split["segments"][1]["to"]["name"], "Lyon Part Dieu")
+        self.assertEqual(split["segments"][2]["from"]["name"], "Lyon Part Dieu")
+        self.assertEqual(split["segments"][2]["to"]["name"], "Grenoble")
 
 
 if __name__ == "__main__":

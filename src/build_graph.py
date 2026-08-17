@@ -403,8 +403,10 @@ def verify(graph: Graph, date: int) -> list[str]:
     besancon = area_id_of("Besançon Viotte")
     bercy = area_id_of("Paris Bercy") or area_id_of("Paris Bercy Bourg. Pays d'Auv.")
 
-    def route_serves(short: str, long_sub: str, a: int | None, b: int | None) -> bool:
-        if a is None or b is None:
+    def route_serves(short: str, long_sub: str, a_list: list[int], b: int | None) -> bool:
+        """Un trip de la ligne `short` (long_name contenant `long_sub`) relie
+        l'un des stops `a_list` à `b`, avec a avant b (ordre de parcours)."""
+        if not a_list or b is None:
             return False
         for ridx, route in enumerate(graph.routes):
             if route.short_name != short:
@@ -416,23 +418,52 @@ def verify(graph: Graph, date: int) -> list[str]:
                 if not graph.is_service_active(trip.service_id, date):
                     continue
                 stops = [st.stop for st in trip.stop_times]
-                if a in stops and b in stops and stops.index(a) < stops.index(b):
-                    return True
+                if b not in stops:
+                    continue
+                bpos = stops.index(b)
+                for a in a_list:
+                    if a in stops and stops.index(a) < bpos:
+                        return True
         return False
 
-    if not route_serves("K7", "lyon p d", paris, dijon):
-        problems.append(f"K7 Paris Gare de Lyon -> Dijon absent à la date {date}")
-    if not route_serves("C11", "besan", dijon, besancon):
+    def route_serves_rev(short: str, long_sub: str, a: int | None, b_list: list[int]) -> bool:
+        """Retour : `a` avant l'un des stops `b_list`."""
+        if a is None or not b_list:
+            return False
+        for ridx, route in enumerate(graph.routes):
+            if route.short_name != short:
+                continue
+            if long_sub not in normalize(route.long_name):
+                continue
+            for tidx in graph.trips_by_route[ridx]:
+                trip = graph.trips[tidx]
+                if not graph.is_service_active(trip.service_id, date):
+                    continue
+                stops = [st.stop for st in trip.stop_times]
+                if a not in stops:
+                    continue
+                apos = stops.index(a)
+                for b in b_list:
+                    if b in stops and stops.index(b) > apos:
+                        return True
+        return False
+
+    # K7 Paris <-> Dijon : le terminus parisien varie selon le service (Paris
+    # Gare de Lyon ou Paris Bercy). On accepte l'un ou l'autre pour l'aller ;
+    # le retour du soir arrive classiquement à Paris Bercy.
+    if not route_serves("K7", "lyon p d", [p for p in (paris, bercy) if p is not None], dijon):
+        problems.append(f"K7 Paris (Gare de Lyon ou Bercy) -> Dijon absent à la date {date}")
+    if not route_serves("C11", "besan", [dijon] if dijon is not None else [], besancon):
         problems.append(f"C11 Dijon -> Besançon Viotte absent à la date {date}")
     if dijon is not None and graph.min_transfer[dijon] < DEFAULT_MIN_TRANSFER_MIN:
         problems.append(f"min_transfer(Dijon)={graph.min_transfer[dijon]} < défaut {DEFAULT_MIN_TRANSFER_MIN}")
 
     # Retour du soir (itinéraire réel, cf. walkthrough.md §5) : car C1/MOBIGO
     # Besançon Viotte -> Dijon, puis K7 17764 Dijon -> Paris Bercy.
-    if not route_serves("C1", "dijon", besancon, dijon):
+    if not route_serves("C1", "dijon", [besancon] if besancon is not None else [], dijon):
         problems.append(f"C1 (MOBIGO) Besançon Viotte -> Dijon absent à la date {date}")
-    if not route_serves("K7", "lyon p d", dijon, bercy):
-        problems.append(f"K7 Dijon -> Paris Bercy absent à la date {date} (retour du soir)")
+    if not route_serves_rev("K7", "lyon p d", dijon, [b for b in (bercy, paris) if b is not None]):
+        problems.append(f"K7 Dijon -> Paris (Bercy ou Gare de Lyon) absent à la date {date} (retour du soir)")
 
     # Groupes « toutes gares » (§5.5) : Paris doit rester bien fourni, et
     # chaque groupe configuré doit contenir au moins 2 gares.
@@ -458,7 +489,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--interchange", type=Path, default=DEFAULT_INTERCHANGE)
     parser.add_argument("--paris-links", type=Path, default=DEFAULT_PARIS_LINKS)
-    parser.add_argument("--date", default="2026-08-10", help="Date de vérification (YYYY-MM-DD)")
+    parser.add_argument("--date", default=None,
+                        help="Date de vérification T2 (YYYY-MM-DD). Défaut : début de couverture du graphe construit.")
     parser.add_argument("--no-paris-links", action="store_true", help="Ne pas charger les arcs intra-Paris")
     args = parser.parse_args(argv)
 
@@ -477,12 +509,15 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(graph.trips)} trips, {graph.date_min}-{graph.date_max}"
     )
 
-    date = int(args.date.replace("-", ""))
+    # T2 — la vérification se fait au début de couverture du graphe construit :
+    # le GTFS téléchargé peut commencer plus tard que la date historique codée
+    # (ex. 2026-08-10) et les lignes K7/C11/C1 ne circulent alors pas ce jour-là.
+    date = int((args.date or f"{graph.date_min//10000}-{graph.date_min%10000//100:02d}-{graph.date_min%100:02d}").replace("-", ""))
     problems = verify(graph, date)
     if problems:
-        print(f"[build] ✗ Acceptation T2 ({args.date}) : {problems}")
+        print(f"[build] ✗ Acceptation T2 ({date}) : {problems}")
         return 1
-    print(f"[build] ✓ Acceptation T2 ({args.date}) : K7 Paris GDL -> Dijon, C11 Dijon -> Besançon, correspondance OK")
+    print(f"[build] ✓ Acceptation T2 ({date}) : K7 Paris GDL -> Dijon, C11 Dijon -> Besançon, correspondance OK")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     graph.save(args.output)

@@ -1,7 +1,7 @@
 /* planTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v8";
+const CACHE = "ter-finder-v11";
 const SHELL = [
   "/",
   "/styles.css",
@@ -14,7 +14,7 @@ const SHELL = [
   "/icon-512.png"
 ];
 
-const API_CACHE = "ter-finder-api-v2";
+const API_CACHE = "ter-finder-api-v5";
 const API_MAX_ENTRIES = 100;
 
 self.addEventListener("install", (event) => {

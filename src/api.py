@@ -26,7 +26,7 @@ from starlette.types import Scope, Receive, Send
 
 from src.graph import Graph, ALIASES, normalize
 from src.raptor import RaptorEngine, _iso as _iso_min
-from src import gtfs_rt, trainline, trainline_cards
+from src import gtfs_rt, tictactrip, trainline, trainline_cards
 from src.pricing import PricingEngine
 
 DEFAULT_GRAPH = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
@@ -39,6 +39,7 @@ _COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 _engine: RaptorEngine | None = None
 _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
+_tt: tictactrip.TictactripClient | None = None
 
 
 def _load_place_groups() -> dict:
@@ -214,11 +215,21 @@ def _minutes(iso: str) -> int:
 
 
 # ---------------------------------------------------------------- application
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="planTER API",
     description="Recherche d'itinéraires 100% TER (moteur McRAPTOR).",
     version="0.1.0",
     lifespan=_lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -336,6 +347,86 @@ def cards_list() -> dict:
     return {"cards": cards}
 
 
+# T12bis — prix réels : envoi du trajet (gares + date) à un serveur tiers
+# (Tictactrip) qui peut journaliser la requête. Ce disclaimer est exposé à
+# l'utilisateur quand l'option « prix réels » est activée.
+REAL_PRICES_DISCLAIMER = (
+    "Votre recherche (gares de départ et d'arrivée, date) est envoyée au "
+    "service Tictactrip, un serveur tiers qui peut journaliser votre requête. "
+    "Les prix affichés sont les prix réellement vendus (promotions comprises), "
+    "ils ne sont pas calculés localement."
+)
+
+
+def _get_tictactrip() -> tictactrip.TictactripClient | None:
+    """Client Tictactrip partagé (créé une seule fois, échec silencieux)."""
+    global _tt
+    if _tt is None:
+        try:
+            _tt = tictactrip.TictactripClient()
+        except Exception:
+            _tt = None
+    return _tt
+
+
+def _real_prices_for(journey, d: _dt.date, tt) -> dict:
+    """Prix réels d'un trajet, leg par leg (legs ferroviaires uniquement).
+
+    Retourne `{"real_price_eur", "real_price_min_eur", "real_price_max_eur",
+    "legs": {leg_idx: {"line", "from", "to", "min_eur", "max_eur", "day_eur",
+    "day_company", "ok"}}}`. `day_eur` est le meilleur prix du jour UNIQUEMENT
+    si le trip du jour est un TER (priceCalendar peut sinon renvoyer un OUIGO/TGV
+    moins cher, hors périmètre) ; `day_company` indique alors la compagnie.
+    Si un leg n'a pas de prix Tictactrip (ville introuvable, 429…),
+    `ok` est False et les totaux agrègent uniquement les legs résolus ; si
+    AUCUN leg n'est résolu, tous les totaux sont None.
+    """
+    total_min = total_max = total_day = 0.0
+    n_ok = 0
+    any_min = any_max = any_day = True
+    legs_out: dict[int, dict] = {}
+    for li, leg in enumerate(journey.legs):
+        if leg.type == "walk":
+            continue
+        leg_date = _iso_min(d, leg.from_time)[:10]
+        try:
+            p = tt.leg_prices(leg.from_name, leg.to_name, leg_date)
+        except tictactrip.TictactripError:
+            p = None
+        if not p:
+            legs_out[li] = {"line": leg.line, "from": leg.from_name, "to": leg.to_name,
+                            "min_eur": None, "max_eur": None, "day_eur": None, "day_company": None, "ok": False}
+            continue
+        fmin = tt.fare_eur(p["min"])
+        fmax = tt.fare_eur(p["max"])
+        fday = tt.fare_eur(p["day"])
+        legs_out[li] = {"line": leg.line, "from": leg.from_name, "to": leg.to_name,
+                        "min_eur": fmin, "max_eur": fmax, "day_eur": fday,
+                        "day_company": p.get("day_company"), "ok": True}
+        if fday is not None:
+            total_day += fday
+        else:
+            any_day = False
+        if fmin is not None:
+            total_min += fmin
+        else:
+            any_min = False
+        if fmax is not None:
+            total_max += fmax
+        else:
+            any_max = False
+        n_ok += 1
+    if n_ok == 0:
+        return {"real_price_eur": None, "real_price_min_eur": None,
+                "real_price_max_eur": None, "legs": legs_out}
+    return {
+        "real_price_eur": round(total_day, 2) if any_day else None,
+        "real_price_min_eur": round(total_min, 2) if any_min else None,
+        "real_price_max_eur": round(total_max, 2) if any_max else None,
+        "legs": legs_out,
+    }
+
+
 @app.get("/v1/journeys", tags=["itinéraires"])
 def journeys(
     from_: str = Query(..., alias="from", description="stop_area_id, « lat,lon » ou nom de gare/groupe"),
@@ -351,6 +442,7 @@ def journeys(
                       description="Tri des résultats : transfers (le moins de correspondances d'abord, défaut), departure (heure de départ) ou duration (le plus court d'abord)"),
     use_realtime: bool = Query(True, description="T8 — appliquer les retards/suppressions GTFS-RT (par défaut, les retards réels sont la réalité affichée)"),
     cards: str = Query("", description="T11 — cartes de réduction TER (ids Trainline, séparés par des virgules). Appliquées au lien de réservation trajet total."),
+    real_prices: bool = Query(False, description="T12bis — chercher les prix réellement vendus (promotions comprises) auprès du service tiers Tictactrip, leg par leg. La requête (gares + date) est alors envoyée à un serveur tiers qui peut journaliser."),
 ) -> dict:
     engine = get_engine()
     g = engine.graph
@@ -402,7 +494,7 @@ def journeys(
         # T12 — prix estimés (modèle v1, calibré sur prix observés) : le prix
         # n'est jamais nul et reste une ESTIMATION clairement signalée. Les
         # cartes de réduction (param `cards`) réduisent `price_reduced_eur`.
-        price_info = _pricing.journey_price(j, cards=card_ids) if _pricing is not None else None
+        price_info = _pricing.journey_price(j, cards=card_ids, date=d) if _pricing is not None else None
         if price_info is not None:
             jd["price_normal_eur"] = price_info.pop("price_normal_eur")
             jd["price_reduced_eur"] = price_info.pop("price_reduced_eur")
@@ -411,66 +503,45 @@ def journeys(
             # réservation par segment (avec la meilleure carte de sa région).
             split = price_info.get("split")
             if split:
-                region_card = {c["region"]: c["id"] for c in price_info.get("cards", [])}
                 for seg in split["segments"]:
                     seg["from"]["stop_area_id"] = _bare(seg["from"]["stop_area_id"])
                     seg["to"]["stop_area_id"] = _bare(seg["to"]["stop_area_id"])
                     seg["from"]["time"] = _iso_min(d, seg.pop("departure_min"))
                     seg["to"]["time"] = _iso_min(d, seg.pop("arrival_min"))
-                    seg["booking"] = None
-                    seg_date = seg["from"]["time"][:10]
-                    seg_time = seg["from"]["time"][11:16]
-                    url = trainline.booking_url(
-                        seg["from"]["stop_area_id"], seg["to"]["stop_area_id"], seg_date, seg_time
-                    )
-                    if url:
-                        # §33 — segment interrégional `gap` : plein tarif, sans
-                        # carte (pas d'accord entre les régions).
-                        cid = None if seg.get("gap") else region_card.get(seg["region"])
-                        seg["booking"] = {
-                            "provider": "trainline",
-                            "url": trainline_cards.booking_url(url, [cid]) if cid else url,
-                        }
-        bookable = 0
-        # T11 — leg ferroviaire de départ et d'arrivée (marches exclues), pour
-        # le lien « trajet total » (une seule réservation de bout en bout).
-        first_leg = last_leg = None
-        for leg in jd["legs"]:
-            leg["booking"] = None
-            if leg["type"] == "walk":
-                continue
-            if first_leg is None:
-                first_leg = leg
-            last_leg = leg
-            leg_date, leg_time = _iso(leg)
-            if not leg_date:
-                continue
-            url = trainline.booking_url(
-                leg["from"]["stop_area_id"], leg["to"]["stop_area_id"],
-                leg_date, leg_time,
-            )
-            if url:
-                leg["booking"] = {"provider": "trainline", "url": url}
-                bookable += 1
-        jd["booking"] = {"provider": "trainline", "tickets": bookable}
-        # T11 — lien trajet total (gare de départ → gare d'arrivée, heure du
-        # premier leg ferroviaire) ; les cartes de réduction y sont ajoutées.
-        if first_leg is not None and last_leg is not None:
-            f_date, f_time = _iso(first_leg)
-            total_url = trainline.booking_url(
-                first_leg["from"]["stop_area_id"], last_leg["to"]["stop_area_id"],
-                f_date, f_time,
-            )
-            if total_url:
-                jd["booking"]["total_url"] = trainline_cards.booking_url(total_url, card_ids)
         # T8 — correspondances à risque (retard réel menaçant la jonction).
         if realtime is not None:
             jd["connection_risks"] = _connection_risks(jd)
         # T8 — perturbations du trajet (Service Alerts).
         if alerts_feed is not None:
             jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
+        # T12bis — prix réels (option) : prix réellement vendus leg par leg
+        # (Tictactrip, promos comprises). La requête est envoyée à un serveur
+        # tiers (disclaimer exposé ci-dessous). Échec = repli sur l'estimation
+        # locale sans faire planter la réponse.
+        if real_prices:
+            tt = _get_tictactrip()
+            if tt is not None:
+                try:
+                    rp = _real_prices_for(j, d, tt)
+                except Exception:
+                    rp = None
+                if rp:
+                    jd["real_price_eur"] = rp["real_price_eur"]
+                    jd["real_price_min_eur"] = rp["real_price_min_eur"]
+                    jd["real_price_max_eur"] = rp["real_price_max_eur"]
+                    for li, info in rp["legs"].items():
+                        jd["legs"][li]["real_price"] = {
+                            k: info[k] for k in ("line", "from", "to", "min_eur", "max_eur", "day_eur", "day_company", "ok")
+                        }
+                    jd["real_prices_disclaimer"] = REAL_PRICES_DISCLAIMER
         out.append(jd)
-    return {"journeys": out}
+    resp = {"journeys": out}
+    if real_prices:
+        resp["real_prices"] = {
+            "provider": "tictactrip",
+            "disclaimer": REAL_PRICES_DISCLAIMER,
+        }
+    return resp
 
 
 def _journey_alerts(alerts, j, g) -> list:
