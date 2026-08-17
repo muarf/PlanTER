@@ -114,5 +114,5 @@ tests/
 
 ## Licence
 
-Code source : [The Unlicense](https://unlicense.org/) — domaine public.
+Code source : **WTFPL** — DO WHAT THE FUCK YOU WANT TO.
 Données SNCF : **ODbL** + Conditions Particulières d'utilisation (attribution requise).
