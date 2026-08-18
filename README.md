@@ -27,11 +27,10 @@ Dans un monde obnubilé par l'immédiateté, la rentabilité absolue et les TGV 
 
 ## Fonctionnalités
 
-- **Itinéraires 100% TER** : aucun TGV, aucun Intercités — uniquement des trains régionaux, avec jusqu'à 3 correspondances.
+- **Itinéraires 100% TER** : aucun TGV, aucun Intercités — uniquement des trains régionaux.
 - **Tarification régionale** : prix estimés calibrés sur les barèmes officiels des 11 régions (AURA, BFC, Bretagne, CVL, GE, HdF, Normandie, Nouvelle-Aquitaine, Occitanie, PACA, PdL). L'Île-de-France n'est pas couverte.
 - **Cartes de réduction** : toutes les cartes TER régionales, avec taux week-end/semaine pour Tempo, LibertiO', illico Liberté, Mobigo+ 26+.
 - **Temps réel** : perturbations GTFS-RT, retards, suppressions.
-- **PWA** : installable sur mobile, fonctionne hors-ligne (recherche côté serveur).
 - **App Android** : APK buildé en CI ([télécharger](https://github.com/muarf/PlanTER/releases)).
 - **Anonymat** : pas de logs, pas de tracking, pas de cookies.
 
@@ -110,7 +109,7 @@ tests/
 
 - **GTFS SNCF** : horaires officiels (open data, licence ODbL) — trains régionaux.
 - **Barèmes tarifaires** : extraits des CGV de chaque région (AURA, BFC, GE, Normandie, Occitanie, PACA, PdL…).
-- **Cartes de réduction** : catalogue régional des cartes TER (toutes régions, pas seulement Trainline).
+- **Cartes de réduction** : catalogue régional des cartes TER.
 
 ## Licence
 
