@@ -23,6 +23,26 @@ from pathlib import Path
 DEFAULT_MIN_TRANSFER_MIN = 5  # §5.3 : défaut de correspondance
 
 
+def approx_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance à vol d'oiseau (km) avec correction de latitude : chaque degré
+    de longitude vaut 111,32 × cos(φ) km, pas 111,32 partout. L'ancienne
+    formule sans cos classait Byans (12,3 km réels) devant Arc-et-Senans
+    (9,5 km) pour un point du Doubs — suffisant à ces échelles, pas besoin
+    de haversine complet."""
+    import math
+
+    coslat = math.cos(math.radians((lat1 + lat2) / 2.0))
+    dx = (lon2 - lon1) * 111_320.0 * coslat
+    dy = (lat2 - lat1) * 110_574.0
+    return math.sqrt(dx * dx + dy * dy) / 1000.0
+
+
+# Plafond du nombre de gares retenues par côté lors d'une résolution
+# « commune / GPS » : le rayon dit jusqu'où chercher, pas combien de gares
+# alimenter au moteur (temps de réponse stable même à 100 km autour de Paris).
+MAX_GARES_PER_SIDE = 8
+
+
 @dataclass
 class StopArea:
     """Une gare (StopArea, location_type=1)."""
@@ -111,9 +131,64 @@ class Graph:
     # -> clé du groupe (ex. "lyon"). Construit depuis config/place_groups.json.
     place_group_aliases: dict[str, str] = field(default_factory=dict)
 
+    # Communes (référentiel géographique offline, geo.api.gouv.fr) :
+    # insee -> (nom, lat, lon, population)
+    communes: dict[str, tuple[str, float, float, int]] = field(default_factory=dict)
+
+    # nom normalisé -> [insee] (recherche/résolution des communes)
+    commune_index: dict[str, list[str]] = field(default_factory=dict)
+
+    # Region de chaque arret bus (stop_idx -> region)
+    bus_stop_region: dict[int, str] = field(default_factory=dict)
+
+    # Region de chaque route (route_idx -> region)
+    route_region: dict[int, str] = field(default_factory=dict)
+
     # Couverture du GTFS
     date_min: int = 0
     date_max: int = 0
+
+    # Index spatial (built lazily) : cell -> list of stop_idx
+    _grid: dict[tuple[int, int], list[int]] | None = field(default=None, repr=False)
+
+    def _build_grid(self, cell_deg: float = 0.002) -> None:
+        grid: dict[tuple[int, int], list[int]] = {}
+        for i, s in enumerate(self.stops):
+            key = (int(s.lat / cell_deg), int(s.lon / cell_deg))
+            grid.setdefault(key, []).append(i)
+        self._grid = grid
+
+    def stops_nearby(self, stop_idx: int, radius_m: float = 200.0) -> list[int]:
+        """Indices de stops à < radius_m de stops[stop_idx] (hors lui-même).
+
+        Grille en degrés mais distances métriques corrigées : la couverture
+        de grille est calculée par axe (les cellules de longitude sont plus
+        petites en mètres qu'en latitude), et le filtre final utilise
+        approx_distance_km. L'ancienne formule ×111 uniforme sous-couvrait
+        l'est-ouest (~3,5 km réels pour un « 5 km » à 47°N)."""
+        import math
+
+        if self._grid is None:
+            self._build_grid()
+        s = self.stops[stop_idx]
+        cell_deg = 0.002
+        coslat = math.cos(math.radians(s.lat))
+        cell_m_lat = cell_deg * 110_574.0
+        cell_m_lon = max(cell_deg * 111_320.0 * coslat, 1e-9)
+        r_lat = int(radius_m / cell_m_lat) + 1
+        r_lon = int(radius_m / cell_m_lon) + 1
+        c_lat = int(s.lat / cell_deg)
+        c_lon = int(s.lon / cell_deg)
+        result: list[int] = []
+        for dlat in range(-r_lat, r_lat + 1):
+            for dlon in range(-r_lon, r_lon + 1):
+                for j in self._grid.get((c_lat + dlat, c_lon + dlon), []):
+                    if j == stop_idx:
+                        continue
+                    o = self.stops[j]
+                    if approx_distance_km(s.lat, s.lon, o.lat, o.lon) * 1000.0 <= radius_m:
+                        result.append(j)
+        return result
 
     # ------------------------------------------------------------------ I/O
     def save(self, path: Path) -> None:
@@ -125,7 +200,17 @@ class Graph:
     def load(path: Path) -> "Graph":
         import pickle
 
-        return pickle.loads(path.read_bytes())
+        g = pickle.loads(path.read_bytes())
+        # backward compat: add fields missing from older pickles
+        if not hasattr(g, "bus_stop_region"):
+            g.bus_stop_region = {}
+        if not hasattr(g, "route_region"):
+            g.route_region = {}
+        if not hasattr(g, "communes"):
+            g.communes = {}
+        if not hasattr(g, "commune_index"):
+            g.commune_index = {}
+        return g
 
     # ------------------------------------------------------ utilitaires
     def is_service_active(self, service_id: str, date: int) -> bool:
@@ -138,11 +223,17 @@ class Graph:
     def stop_by_id(self, stop_area_id: str) -> int:
         return self.stop_index[stop_area_id]
 
+    def _is_bus(self, idx: int) -> bool:
+        return self.stops[idx].id.startswith("BusStop:")
+
     def find_stops(self, query: str) -> list[tuple[int, str]]:
         """Gares candidates pour une recherche (autocomplete §5.4).
 
         Correspondance exacte (nom normalisé) d'abord, puis préfixe, puis
-        sous-chaîne. Retourne [(stop_idx, nom)], classées par pertinence.
+        sous-chaîne. Retourne [(stop_idx, nom)], classées par pertinence :
+        les gares (StopArea) passent toujours avant les arrêts bus — le tri
+        alphabétique pur faisait remonter les « VILLE … » en majuscules des
+        feeds bus devant les gares homonymes.
         """
         norm = normalize(query)
         if not norm:
@@ -150,7 +241,11 @@ class Graph:
         results: list[tuple[int, str]] = []
         if norm in self.search_index:
             results = [(idx, self.stops[idx].name) for idx in self.search_index[norm]]
-        if not results:
+        # La clé exacte peut ne contenir que des arrêts bus (indexation par
+        # premier mot des feeds régionaux : « besancon » → « BESANCON … »).
+        # On fusionne alors le tier préfixe, sinon les gares homonymes
+        # (« Besançon Viotte »…) resteraient introuvables.
+        if not results or all(self._is_bus(idx) for idx, _ in results):
             for key, idxs in self.search_index.items():
                 if key.startswith(norm):
                     results.extend((idx, self.stops[idx].name) for idx in idxs)
@@ -158,43 +253,180 @@ class Graph:
             for key, idxs in self.search_index.items():
                 if norm in key:
                     results.extend((idx, self.stops[idx].name) for idx in idxs)
-        # dédup (une gare peut apparaître sous plusieurs clés) + tri
+        # dédup : une gare peut apparaître sous plusieurs clés ; deux arrêts
+        # bus de feeds régionaux différents peuvent désigner le même point
+        # physique (ex. « BESANCON PEM Viotte » UT25/UT70) → on fusionne les
+        # doublons (même nom normalisé à < ~300 m).
         seen: set[int] = set()
+        seen_bus: dict[str, list[tuple[float, float]]] = {}
         out: list[tuple[int, str]] = []
         for idx, name in results:
-            if idx not in seen:
-                seen.add(idx)
-                out.append((idx, name))
-        out.sort(key=lambda it: it[1])
+            if idx in seen:
+                continue
+            seen.add(idx)
+            if self._is_bus(idx):
+                coords = seen_bus.setdefault(normalize(name), [])
+                s = self.stops[idx]
+                if any((s.lat - la) ** 2 + (s.lon - lo) ** 2 < 0.003 ** 2 for la, lo in coords):
+                    continue
+                coords.append((s.lat, s.lon))
+            out.append((idx, name))
+        # gares d'abord, ordre alphabétique dans chaque catégorie
+        out.sort(key=lambda it: (1 if self._is_bus(it[0]) else 0, it[1]))
         return out
 
-    def resolve_place(self, query: str) -> list[int]:
-        """Résout un lieu de recherche en une liste de gares (§5.5).
+    # ------------------------------------------------------------- communes
+    def find_communes(self, query: str, limit: int = 5) -> list[dict]:
+        """Communes candidates pour l'autocomplete : correspondance exacte,
+        puis préfixe, puis sous-chaîne sur le nom normalisé. Retourne
+        [{id, name, lat, lon}], les plus peuplées d'abord (les homonymes).
 
-        - « Ville toutes gares » (ou une ville sans gare homonyme, ex. Lyon,
-          Marseille, Lille) → tous les membres du groupe (N'importe lequel
-          satisfait la recherche).
-        - Une ville dont le nom EST une gare (ex. « Dijon ») → la gare unique ;
-          le groupe n'est demandé qu'à travers « Dijon toutes gares ».
-        - Sinon → la meilleure gare unique (autocomplete).
+        Si le graphe a été construit avec le précalcul « gare la plus proche »
+        (tuples à 6 éléments), chaque entrée expose en plus
+        `nearest_gare` / `nearest_km` pour l'affichage (« By · Liesle 7,9 km »).
+        """
+        norm = normalize(query)
+        if not norm or not self.commune_index:
+            return []
+        if norm in self.commune_index:
+            keys = [norm]
+        else:
+            keys = sorted(k for k in self.commune_index if k.startswith(norm))
+            if not keys:
+                keys = sorted(k for k in self.commune_index if norm in k)
+        rows = []
+        for k in keys:
+            for insee in self.commune_index[k]:
+                entry = self.communes[insee]
+                # compat anciens pickles : tuple (nom, lat, lon, pop) sans précalcul
+                nom, lat, lon, pop = entry[0], entry[1], entry[2], entry[3]
+                extra = entry[4:] if len(entry) >= 6 else ()
+                rows.append((insee, nom, lat, lon, pop, extra))
+        rows.sort(key=lambda r: (-r[4], r[1]))
+        out = []
+        for code, nom, lat, lon, _pop, extra in rows[:limit]:
+            item = {"id": f"commune:{code}", "name": nom, "lat": lat, "lon": lon}
+            if extra and extra[0] is not None:
+                idx, km = extra
+                item["nearest_gare"] = self.stops[idx].name
+                item["nearest_km"] = round(float(km), 1)
+            out.append(item)
+        return out
+
+    def resolve_commune(self, value: str) -> tuple[float, float] | None:
+        """Résout « commune:<insee> » ou un nom de commune exact en (lat, lon)."""
+        v = value.strip()
+        if v.startswith("commune:"):
+            entry = self.communes.get(v.removeprefix("commune:"))
+            return (entry[1], entry[2]) if entry else None
+        hits = self.commune_index.get(normalize(v))
+        if hits:
+            entry = self.communes[hits[0]]
+            return (entry[1], entry[2])
+        return None
+
+    def commune_name(self, value: str) -> str | None:
+        """Nom de la commune résolue (« commune:<insee> », nom exact ou id),
+        pour les messages d'erreur et les notes de trajet."""
+        v = value.strip()
+        if v.startswith("commune:"):
+            entry = self.communes.get(v.removeprefix("commune:"))
+            return entry[0] if entry else None
+        hits = self.commune_index.get(normalize(v))
+        if hits:
+            return self.communes[hits[0]][0]
+        return None
+
+    def nearest_gares(
+        self,
+        lat: float,
+        lon: float,
+        min_km: float = 0.0,
+        max_km: float = 0.0,
+        n: int = MAX_GARES_PER_SIDE,
+    ) -> list[int]:
+        """Gares (StopArea, hors arrêts bus) autour d'un point.
+
+        - max_km == 0 : défaut « la gare la plus proche » — UNE seule gare,
+          quelle que soit sa distance.
+        - max_km > 0 : gares dont la distance RÉELLE est dans [min_km, max_km],
+          triées par distance, plafonnées à n.
+        """
+        scored = []
+        for i, s in enumerate(self.stops):
+            if s.id.startswith("BusStop:"):
+                continue
+            d = approx_distance_km(lat, lon, s.lat, s.lon)
+            scored.append((d, i))
+        scored.sort(key=lambda it: it[0])
+        if max_km > 0:
+            scored = [(d, i) for d, i in scored if min_km <= d <= max_km]
+        else:
+            n = 1
+        return [i for _, i in scored[:n]]
+
+    def resolve_place(
+        self,
+        query: str,
+        radius_min_km: float = 0.0,
+        radius_max_km: float = 0.0,
+    ) -> list[int]:
+        idxs, _ctx = self.resolve_place_ctx(query, radius_min_km, radius_max_km)
+        return idxs
+
+    def resolve_place_ctx(
+        self,
+        query: str,
+        radius_min_km: float = 0.0,
+        radius_max_km: float = 0.0,
+    ) -> tuple[list[int], dict | None]:
+        """Résout un lieu → (gares, contexte de provenance).
+
+        Le contexte est non-None UNIQUEMENT pour une résolution géographique
+        (commune) : il alimente les notes « Départ/Arrivée à X — N km de Y ».
+        Priorité inchangée (§5.5) : alias groupe → gare(s) exacte(s) → commune
+        → arrêt bus exact → autocomplete. La commune ne prend donc JAMAIS le
+        dessus sur des gares homonymes (ex. « Lyon » reste multi-gares).
+
+        Le rayon [radius_min_km, radius_max_km] ne s'applique qu'à la branche
+        commune ; une requête qui désigne exactement une gare n'est jamais
+        filtrée.
         """
         norm = normalize(query)
         aliases = getattr(self, "place_group_aliases", {})
         if norm in aliases:
             group_key = aliases[norm]
+            # Ville dont le nom EST une gare (ex. « Dijon ») → la gare ; mais
+            # si la clé exacte ne contient que des arrêts bus (ex. « besancon »
+            # via les feeds régionaux), on retombe sur le groupe de gares.
             if norm in self.search_index:
-                return list(self.search_index[norm])
-            return list(self.place_groups.get(group_key, []))
+                gares = [i for i in self.search_index[norm] if not self._is_bus(i)]
+                if gares:
+                    return gares, None
+            return list(self.place_groups.get(group_key, [])), None
+        # correspondance exacte : les gares priment sur les arrêts bus homonymes
         if norm in self.search_index:
-            return list(self.search_index[norm])
+            idxs = self.search_index[norm]
+            gares = [i for i in idxs if not self._is_bus(i)]
+            if gares:
+                return gares, None
+        # commune exacte (nom tapé ou id) → gares dans l'intervalle de rayon
+        coords = self.resolve_commune(query)
+        if coords is not None:
+            label = self.commune_name(query) or query
+            idxs = self.nearest_gares(coords[0], coords[1], min_km=radius_min_km, max_km=radius_max_km)
+            return idxs, {"kind": "commune", "label": label, "lat": coords[0], "lon": coords[1]}
+        # clé exacte bus uniquement (sélection explicite d'un arrêt)
+        if norm in self.search_index:
+            return list(self.search_index[norm]), None
         hits = self.find_stops(query)
         if not hits:
-            return []
+            return [], None
         first_name = hits[0][1]
         norm_first = normalize(first_name)
         if norm_first in self.search_index:
-            return list(self.search_index[norm_first])
-        return [idx for idx, _ in hits[:1]]
+            return list(self.search_index[norm_first]), None
+        return [idx for idx, _ in hits[:1]], None
 
 
 # ------------------------------------------------------------ normalisation

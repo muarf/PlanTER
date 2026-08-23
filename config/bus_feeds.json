@@ -1,0 +1,166 @@
+{
+  "feeds": [
+    {
+      "id": "bfc",
+      "name": "Mobigo Bourgogne-Franche-Comté",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/28d3c8bf-97f7-40ed-be9f-00e737f74757",
+      "region": "BFC",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "aura",
+      "name": "Agrégat Oùra Auvergne-Rhône-Alpes",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/231acea2-40cf-4c06-b2eb-646274e0b853",
+      "region": "AURA",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "grand_est",
+      "name": "Fluo Grand Est",
+      "url": "https://transport.data.gouv.fr/resources/83635/download",
+      "region": "Grand Est",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "occitanie",
+      "name": "liO Occitanie",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/d747fe79-2915-4cdd-8cc5-51a810baaca5",
+      "region": "Occitanie",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "pdl",
+      "name": "Aléop interurbain",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/916752e4-5daa-48bd-8bc1-4dd8d64f1d4a",
+      "region": "PdL",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "bretagne_22",
+      "name": "BreizhGo Car Côtes-d'Armor",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/d09facf8-2bc9-4d8c-ad43-d5cb05f39406",
+      "region": "Bretagne",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "bretagne_29",
+      "name": "BreizhGo Car Finistère",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/c407501a-ee0d-425d-b954-42927c0eaffa",
+      "region": "Bretagne",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "bretagne_35",
+      "name": "BreizhGo Car Ille-et-Vilaine",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/69948a62-0bac-4081-8ae0-d71c4d5b751d",
+      "region": "Bretagne",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "bretagne_56",
+      "name": "BreizhGo Car Morbihan",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/1b9a895a-1843-4620-bcd4-3bbd08c396c0",
+      "region": "Bretagne",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "cvl",
+      "name": "Rémi interurbain",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/6c52238c-1c1e-4c5a-922b-8b66c0415a9e",
+      "region": "CVL",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "normandie",
+      "name": "Nomad Car interurbain",
+      "url": "https://transport.data.gouv.fr/resources/82317/download",
+      "region": "Normandie",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "paca_proximite",
+      "name": "ZOU! Proximité PACA",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/9c8116cb-2f1a-4045-b149-c5bf6cae6bef",
+      "region": "PACA",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "paca_express",
+      "name": "ZOU! Express PACA",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/1164d75b-4a9f-4c5a-b765-31d861b34fda",
+      "region": "PACA",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "hdf_02",
+      "name": "Interurbain Aisne",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/4258bcab-8da4-42fe-a811-0135d7476e85",
+      "region": "HdF",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "hdf_59",
+      "name": "Interurbain Nord",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/1e2937e3-d495-44bc-aec0-bd5da085e3a4",
+      "region": "HdF",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "hdf_60",
+      "name": "Interurbain Oise",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/c50a9ec8-98dc-40ee-a842-555738197957",
+      "region": "HdF",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "hdf_62",
+      "name": "Interurbain Pas-de-Calais",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/3e744287-1221-47fd-96e0-fa154e79c4f8",
+      "region": "HdF",
+      "allowed_route_types": [
+        3
+      ]
+    },
+    {
+      "id": "hdf_80",
+      "name": "Interurbain Somme",
+      "url": "https://www.data.gouv.fr/api/1/datasets/r/429d30fb-ba6e-4e90-ad82-6d589a98cbfd",
+      "region": "HdF",
+      "allowed_route_types": [
+        3
+      ]
+    }
+  ]
+}

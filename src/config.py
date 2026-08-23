@@ -62,3 +62,14 @@ MODE_VEHICLE_TYPE = {
     "TramTrain": "tram_train",
     "Train": "train",
 }
+
+
+# ---------------------------------------------------------------------------
+# Bus régionaux interurbains : préfixe des arrêts bus dans le graphe.
+# Les stop_id bus sont préfixés pour éviter les collisions avec les IDs SNCF.
+# Ex. : BusStop:UT21:03607 (arrêt bus Mobigo BFC)
+# ---------------------------------------------------------------------------
+BUS_STOP_PREFIX = "BusStop:"
+
+# Fichier de config des feeds bus régionaux.
+BUS_FEEDS_FILE = "config/bus_feeds.json"

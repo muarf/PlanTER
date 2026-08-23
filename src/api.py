@@ -1,8 +1,9 @@
 """T5 — api.py : API REST FastAPI (§7 PLAN.md).
 
 Endpoints (§7.2) :
-- GET /v1/stations/search?q=&limit=  → autocomplete gares
-- GET /v1/journeys                  → itinéraires TER (moteur McRAPTOR T3)
+- POST /v1/stations/search {q, limit}  → autocomplete (gares, communes, bus)
+  — GET conservé pour les clients historiques
+- POST /v1/journeys                  → itinéraires TER (moteur McRAPTOR T3)
 - GET /v1/health                    → état
 
 Contrats d'erreur (§7.3) : gare introuvable → 404 STATION_NOT_FOUND (avec
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from pathlib import Path
@@ -22,12 +24,19 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request, Body
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope, Receive, Send
 
-from src.graph import Graph, ALIASES, normalize
-from src.raptor import RaptorEngine, _iso as _iso_min
-from src import gtfs_rt, tictactrip, trainline, trainline_cards
+from src.graph import (
+    MAX_GARES_PER_SIDE,
+    approx_distance_km,
+    Graph,
+    ALIASES,
+    normalize,
+)
+from src.raptor import RaptorEngine, _iso as _iso_min, _vehicle_label
+from src import gtfs_rt, scraper_tictactrip as tictactrip, trainline, trainline_cards
 from src.pricing import PricingEngine
 from src.pow import PoWEngine
 from src.crypto import CryptoEngine
@@ -45,8 +54,8 @@ _pricing: PricingEngine | None = None
 _tt: tictactrip.TictactripClient | None = None
 _pow = PoWEngine()
 _crypto = CryptoEngine()
-_raptor_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="raptor")
-RAPTOR_TIMEOUT_S = 10
+_raptor_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="raptor")
+RAPTOR_TIMEOUT_S = 35
 
 
 def _load_place_groups() -> dict:
@@ -64,17 +73,49 @@ def get_engine(graph_path: Path = DEFAULT_GRAPH) -> RaptorEngine:
     if _engine is None:
         _engine = RaptorEngine(Graph.load(graph_path))
         _pricing = PricingEngine(_engine.graph)
+        # Compute route_region for each route (used for region-based filtering)
+        g = _engine.graph
+        for ridx in range(len(g.routes)):
+            if ridx in g.route_region:
+                continue
+            trips = g.trips_by_route[ridx]
+            if not trips:
+                g.route_region[ridx] = "INCONNUE"
+                continue
+            t = g.trips[trips[0]]
+            if t.stop_times:
+                g.route_region[ridx] = _pricing.stop_region(t.stop_times[0].stop)
+            else:
+                g.route_region[ridx] = "INCONNUE"
         # T8 — temps réel GTFS-RT en arrière-plan ; l'échec de démarrage ne
         # bloque pas l'API (le poller retentera au prochain intervalle).
         try:
-            _poller = gtfs_rt.RealtimePoller(_engine.graph)
+            _poller = gtfs_rt.RealtimePoller(
+                _engine.graph, extra_trip_urls=[gtfs_rt.LIO_URL]
+            )
             _poller.start()
         except Exception:
             _poller = None
     return _engine
 
 
-def _lifespan(app: FastAPI):
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    import sys, time as _t
+    _t0 = _t.monotonic()
+    eng = get_engine()
+    g = eng.graph
+    # Pre-warm RAPTOR views cache for all vehicle types
+    # Pick a central station (Paris) to trigger _views() cache population
+    paris_ids = g.resolve_place("Paris")
+    if paris_ids:
+        for v in ("bus_train", "train_only", "all"):
+            eng._views(20260825, v)
+    _t1 = _t.monotonic()
+    print("[startup] Graph + views preloaded in %.1fs (%d stops, %d trips)" % (
+        _t1 - _t0, len(g.stops), len(g.trips)), file=sys.stderr)
     yield
     # Arrêt propre du poller GTFS-RT à la fermeture (uvicorn --reload).
     global _poller
@@ -112,34 +153,112 @@ def _parse_time(value: str) -> int:
     return int(m.group(1)) * 60 + int(m.group(2))
 
 
-def _nearest_stops(g: Graph, lat: float, lon: float, n: int = 3) -> list[int]:
-    """Indices des gares les plus proches des coordonnées (distance euclidienne
-    sur latitude/longitude, suffisante pour une recherche de proximité)."""
+def _nearest_stops(
+    g: Graph,
+    lat: float,
+    lon: float,
+    min_km: float = 0.0,
+    max_km: float = 0.0,
+    n: int = MAX_GARES_PER_SIDE,
+) -> list[int]:
+    """Gares les plus proches de coordonnées « lat,lon » (distance réelle
+    corrigée cos(latitude), cf. graph.approx_distance_km). Mêmes conventions
+    que Graph.nearest_gares : max_km == 0 → la gare la plus proche seule ;
+    max_km > 0 → intervalle [min_km, max_km] en km réels, plafonné à n."""
     scored = []
     for i, s in enumerate(g.stops):
-        d = (s.lat - lat) ** 2 + (s.lon - lon) ** 2
-        scored.append((d, i))
+        if s.id.startswith("BusStop:"):
+            continue
+        scored.append((approx_distance_km(lat, lon, s.lat, s.lon), i))
     scored.sort(key=lambda it: it[0])
+    if max_km > 0:
+        scored = [(d, i) for d, i in scored if min_km <= d <= max_km]
+    else:
+        n = 1
     return [i for _, i in scored[:n]]
 
 
-def _resolve_place(g: Graph, value: str) -> list[int]:
-    """stop_area_id exact (avec ou sans préfixe « StopArea: »), coordonnées
-    « lat,lon », nom/groupe ou autocomplete."""
+GPS_FAIRNESS_KM = 5.0
+"""Fenêtre « équité » autour de la gare la plus proche pour une résolution
+GPS sans rayon explicite : on retient aussi les gares jusqu'à GPS_FAIRNESS_KM
+km AU-DELÀ de la plus proche (plafonné à MAX_GARES_PER_SIDE).
+
+Motivation : la gare la plus proche à vol d'oiseau n'est pas forcément la mieux
+desservie (ex. Mesves-sur-Loire : Pouilly-sur-Loire, 12 trains/jour et 1 seul
+direct Paris, à 6,7 km ; La Charité-sur-Loire, 22 trains/jour dont 12 directs,
+à 10 km). En laissant concourir les gares voisines, RAPTOR propose le meilleur
+itinéraire réel — comportement SNCF Connect."""
+
+
+def _nearest_stops_window(g: Graph, lat: float, lon: float) -> list[int]:
+    """Gare la plus proche + gares dans la fenêtre d'équité (cf.
+    GPS_FAIRNESS_KM), plafonné à MAX_GARES_PER_SIDE."""
+    scored = []
+    for i, s in enumerate(g.stops):
+        if s.id.startswith("BusStop:"):
+            continue
+        scored.append((approx_distance_km(lat, lon, s.lat, s.lon), i))
+    scored.sort(key=lambda it: it[0])
+    window = scored[0][0] + GPS_FAIRNESS_KM
+    return [i for d, i in scored if d <= window][:MAX_GARES_PER_SIDE]
+
+
+def _fmt_km(km: float) -> str:
+    """« 7.9 » → « 7,9 » ; « 12.0 » → « 12 » (messages utilisateur)."""
+    s = f"{km:.1f}".rstrip("0").rstrip(".")
+    return s.replace(".", ",")
+
+
+def _no_gare_in_radius(rmin: float, rmax: float, label: str) -> HTTPException:
+    return _error(
+        404,
+        "NO_GARE_IN_RADIUS",
+        f"Aucune gare entre {_fmt_km(rmin)} et {_fmt_km(rmax)} km de {label}. "
+        "Élargissez le rayon de recherche.",
+    )
+
+
+def _resolve_place(
+    g: Graph,
+    value: str,
+    radius_min_km: float = 0.0,
+    radius_max_km: float = 0.0,
+) -> tuple[list[int], dict | None]:
+    """Résout un lieu → (gares, contexte de provenance).
+
+    Le contexte (`ctx`) est renseigné quand le lieu a été résolu
+    GÉOGRAPHIQUEMENT (commune ou coordonnées GPS) : il sert aux notes
+    « Départ/Arrivée à X — N km de Y » et au message d'intervalle vide.
+    None pour une résolution par nom exact / groupe (rien à préciser).
+
+    Le rayon ne s'applique qu'à ces résolutions géographiques : une requête
+    qui désigne exactement une gare n'est jamais filtrée.
+    """
     value = value.strip()
     if value in g.stop_index:
-        return [g.stop_index[value]]
+        return [g.stop_index[value]], None
     if value.startswith("OCE") and f"StopArea:{value}" in g.stop_index:
-        return [g.stop_index[f"StopArea:{value}"]]
+        return [g.stop_index[f"StopArea:{value}"]], None
     m = _COORDS_RE.match(value)
     if m:
-        return _nearest_stops(g, float(m.group(1)), float(m.group(2)))
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if radius_max_km > 0:
+            idxs = _nearest_stops(g, lat, lon, min_km=radius_min_km, max_km=radius_max_km)
+            if not idxs:
+                raise _no_gare_in_radius(radius_min_km, radius_max_km, "votre position")
+        else:
+            idxs = _nearest_stops_window(g, lat, lon)
+        return idxs, {"kind": "gps", "label": "votre position", "lat": lat, "lon": lon}
     if value.startswith("place_group:"):
         key = value.removeprefix("place_group:")
         if key in g.place_groups:
-            return list(g.place_groups[key])
-    idxs = g.resolve_place(value)
+            return list(g.place_groups[key]), None
+    # Priorité §5.5 complète (alias/groupe → gares exactes → commune → bus →
+    # autocomplete) ; seul un chemin géographique (commune) renvoie un ctx.
+    idxs, ctx = g.resolve_place_ctx(value, radius_min_km, radius_max_km)
     if not idxs:
+        if ctx is not None and radius_max_km > 0:
+            raise _no_gare_in_radius(radius_min_km, radius_max_km, ctx["label"])
         suggestions = [name for _, name in g.find_stops(value)[:3]]
         raise _error(
             404,
@@ -147,7 +266,7 @@ def _resolve_place(g: Graph, value: str) -> list[int]:
             f"gare ou lieu introuvable : {value!r}",
             suggestions=suggestions,
         )
-    return idxs
+    return idxs, ctx
 
 
 def _stop_aliases(g: Graph, stop_idx: int) -> list[str]:
@@ -179,6 +298,24 @@ def _bare_journey(j: dict) -> dict:
         leg["from"]["stop_area_id"] = _bare(leg["from"]["stop_area_id"])
         leg["to"]["stop_area_id"] = _bare(leg["to"]["stop_area_id"])
     return j
+
+
+_ARTICLE_PREFIXES = {"saint", "sainte", "st", "ste", "le", "la", "les", "sur", "sous", "grand", "petit"}
+
+
+def _city_prefix(name: str) -> str:
+    tokens = _normalize(name).split()
+    if not tokens:
+        return ""
+    if len(tokens) >= 2 and tokens[0] in _ARTICLE_PREFIXES:
+        return f"{tokens[0]} {tokens[1]}"
+    return tokens[0]
+
+
+def _is_same_city(name1: str, name2: str) -> bool:
+    c1 = _city_prefix(name1)
+    c2 = _city_prefix(name2)
+    return bool(c1 and c2 and c1 == c2)
 
 
 # T8 — une correspondance est « risquée » si le train entrant est en retard et
@@ -309,11 +446,11 @@ def _last_refresh() -> dict | None:
         return None
 
 
-@app.get("/v1/stations/search", tags=["gares"])
-def stations_search(
-    q: str = Query(..., description="Texte de recherche (nom, alias, partie de nom)"),
-    limit: int = Query(10, ge=1, le=50),
-) -> dict:
+def _stations_search_impl(q: str, limit: int) -> dict:
+    """Logique partagée GET/POST de l'autocomplete. Réponse en 4 blocs :
+    place_groups (« toutes gares »), stations (gares), communes (villes sans
+    gare, résolues offline), bus_stops. Les gares passent avant les arrêts
+    bus (tri dans Graph.find_stops)."""
     g = get_engine().graph
     hits = g.find_stops(q)[:limit]
     qn = normalize(q)
@@ -330,20 +467,51 @@ def stations_search(
                     "stop_area_ids": [_bare(g.stops[i].id) for i in g.place_groups.get(key, [])],
                 }
             )
+    gares: list[dict] = []
+    bus_stops: list[dict] = []
+    for idx, _name in hits:
+        stop = g.stops[idx]
+        item = {
+            "stop_area_id": _bare(stop.id),
+            "name": stop.name,
+            "lat": stop.lat,
+            "lon": stop.lon,
+        }
+        if stop.id.startswith("BusStop:"):
+            bus_stops.append(item)
+        else:
+            item["aliases"] = _stop_aliases(g, idx)
+            item["trainline_slug"] = trainline.slug_for(stop.id)
+            gares.append(item)
     return {
-        "stations": [
-            {
-                "stop_area_id": _bare(g.stops[idx].id),
-                "name": g.stops[idx].name,
-                "lat": g.stops[idx].lat,
-                "lon": g.stops[idx].lon,
-                "aliases": _stop_aliases(g, idx),
-                "trainline_slug": trainline.slug_for(g.stops[idx].id),
-            }
-            for idx, _ in hits
-        ],
+        "stations": gares,
+        "communes": g.find_communes(q, limit=min(5, limit)),
+        "bus_stops": bus_stops,
         "place_groups": groups,
     }
+
+
+@app.get("/v1/stations/search", tags=["gares"])
+def stations_search(
+    q: str = Query(..., description="Texte de recherche (nom, alias, partie de nom)"),
+    limit: int = Query(10, ge=1, le=50),
+) -> dict:
+    """Autocomplete en GET — conservé pour les clients historiques (app
+    Android embarquée). Le client web utilise POST (sans trace de log)."""
+    return _stations_search_impl(q, limit)
+
+
+class SearchRequest(BaseModel):
+    """Body du POST /v1/stations/search (le client web n'envoie plus la
+    requête en GET : ni log nginx, ni cache navigateur)."""
+
+    q: str = Field(..., min_length=1, description="Texte de recherche")
+    limit: int = Field(10, ge=1, le=50)
+
+
+@app.post("/v1/stations/search", tags=["gares"])
+def stations_search_post(body: SearchRequest) -> dict:
+    return _stations_search_impl(body.q, body.limit)
 
 
 @app.get("/v1/cards", tags=["itinéraires"])
@@ -489,12 +657,14 @@ def journeys(
     if not isinstance(max_transfers, int) or max_transfers < 0 or max_transfers > 6:
         raise _error(400, "INVALID_PARAM", "max_transfers doit être entre 0 et 6.")
     vehicle = params.get("vehicle", "train_only")
-    if vehicle not in ("all", "train_only"):
-        raise _error(400, "INVALID_PARAM", "vehicle doit être 'all' ou 'train_only'.")
+    if vehicle not in ("all", "train_only", "bus", "bus_train"):
+        raise _error(400, "INVALID_PARAM", "vehicle doit être 'all', 'train_only', 'bus' ou 'bus_train'.")
     count = params.get("count", 5)
     if not isinstance(count, int) or count < 1 or count > 20:
         raise _error(400, "INVALID_PARAM", "count doit être entre 1 et 20.")
     sort = params.get("sort", "transfers")
+    if params.get("prioritize_fewer_transfers"):
+        sort = "transfers"
     if sort not in ("departure", "duration", "transfers"):
         raise _error(400, "INVALID_PARAM", "sort doit être 'departure', 'duration' ou 'transfers'.")
     use_realtime = params.get("use_realtime", True)
@@ -506,29 +676,128 @@ def journeys(
     real_prices = params.get("real_prices", False)
     if not isinstance(real_prices, bool):
         real_prices = False
+    expand_nearby = params.get("expand_nearby", False)
+    if not isinstance(expand_nearby, bool):
+        expand_nearby = False
+
+    # Rayon utilisateur (double curseur) pour les résolutions géographiques
+    # (commune / GPS) : gares retenues dans [min, max] km réels, plafonnées
+    # à MAX_GARES_PER_SIDE par côté. Défaut [0, 0] = la gare la plus proche,
+    # sans limite de distance (comportement prévisible, jamais d'erreur).
+    def _radius(val) -> float | None:
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return None
+        return min(max(float(val), 0.0), 100.0)
+
+    r_min = _radius(params.get("radius_min_km", 0))
+    r_max = _radius(params.get("radius_max_km", 0))
+    if r_min is None or r_max is None:
+        raise _error(400, "INVALID_PARAM", "radius_min_km / radius_max_km doivent être numériques.")
+    if r_min > r_max:
+        r_min, r_max = r_max, r_min
 
     engine = get_engine()
     g = engine.graph
     d = _parse_date(date, g)
     t0 = _parse_time(time)
 
-    origins = _resolve_place(g, from_)
-    dests = _resolve_place(g, to)
+    origins_raw, origin_ctx = _resolve_place(g, from_, r_min, r_max)
+    dests_raw, dest_ctx = _resolve_place(g, to, r_min, r_max)
+    req_origin_ids = {g.stops[i].id for i in origins_raw}
+    req_dest_ids = {g.stops[i].id for i in dests_raw}
+
+    # Expand origins with nearby stops (< 200m) so RAPTOR can board directly.
+    # For destinations: expand within 5km, but by default ONLY within the same
+    # city/commune (unless expand_nearby is True, which allows neighboring stations).
+    def _expand_stops(stops: list[int], radius_m: float, allow_other_cities: bool) -> list[int]:
+        expanded = set(stops)
+        for idx in list(stops):
+            orig_name = g.stops[idx].name
+            for nearby_idx in g.stops_nearby(idx, radius_m):
+                nearby_name = g.stops[nearby_idx].name
+                # Toujours autoriser si < 200m (arrêt en face / pôle multimodal)
+                if approx_distance_km(
+                    g.stops[idx].lat, g.stops[idx].lon,
+                    g.stops[nearby_idx].lat, g.stops[nearby_idx].lon,
+                ) <= 0.2:
+                    expanded.add(nearby_idx)
+                elif allow_other_cities or _is_same_city(orig_name, nearby_name):
+                    expanded.add(nearby_idx)
+        return list(expanded)
+
+    origins = _expand_stops(origins_raw, 200.0, allow_other_cities=False)
+    dests = _expand_stops(dests_raw, 5000.0, allow_other_cities=expand_nearby)
 
     # T8 — le moteur consomme un instantané du poller (graphe et temps réel
     # sont partagés en lecture seule via snapshot()).
-    realtime = _poller.snapshot() if (use_realtime and _poller is not None) else None
+    realtime = None
+    if use_realtime and _poller is not None:
+        rt_snap = _poller.snapshot()
+        if rt_snap.cancelled or rt_snap.trip_delays:
+            realtime = rt_snap
+
+    # Route proximity filter: only include routes with stops near origin/dest.
+    # Uses geographic distance (5km) + 1-hop expansion via shared stops.
+    region_filter = None
+    if vehicle in ("bus", "bus_train"):
+        # Collect all origin/dest coordinates
+        search_stops = set(origins + dests)
+        latlons = [(g.stops[idx].lat, g.stops[idx].lon) for idx in search_stops]
+        # Find routes with at least one stop within 5km of any origin/dest
+        relevant_routes: set[int] = set()
+        for stop_idx, route_ids in enumerate(g.routes_by_stop):
+            if not route_ids:
+                continue
+            s = g.stops[stop_idx]
+            for slat, slon in latlons:
+                dlat = s.lat - slat
+                dlon = s.lon - slon
+                if abs(dlat) < 0.05 and abs(dlon) < 0.075:
+                    km = approx_distance_km(slat, slon, s.lat, s.lon)
+                    if km < 5.0:
+                        relevant_routes.update(route_ids)
+                        break
+        # 1-hop expansion: add routes that share a stop with any filtered route.
+        # This captures intermediate routes (ex: C2 Nevers→Clermont connecting
+        # Paris to bus 283) without blowing up the filter.
+        if relevant_routes:
+            hop1: set[int] = set()
+            for stop_idx, route_ids in enumerate(g.routes_by_stop):
+                if route_ids and any(r in relevant_routes for r in route_ids):
+                    hop1.update(route_ids)
+            relevant_routes.update(hop1)
+        if relevant_routes:
+            region_filter = relevant_routes
 
     def _run_raptor():
         if datetime_represents == "arrival":
-            return engine.arrive_by_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+            return engine.arrive_by_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime, region_filter=region_filter)
         else:
-            return engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime)
+            return engine.depart_after_wide(int(d.strftime("%Y%m%d")), origins, dests, t0, max_transfers, vehicle, realtime, region_filter=region_filter)
 
+    future = _raptor_pool.submit(_run_raptor)
     try:
-        journeys = _raptor_pool.submit(_run_raptor).result(timeout=RAPTOR_TIMEOUT_S)
+        journeys = future.result(timeout=RAPTOR_TIMEOUT_S)
     except _FutureTimeout:
+        future.cancel()
         raise _error(503, "TIMEOUT", "Le calcul d'itinéraire a pris trop de temps. Réessayez avec des critères plus simples.")
+
+    # Pareto dominance filter: remove journeys dominated by another.
+    # A is dominated by B when B departs >= as late AND arrives <= as early
+    # AND has <= transfers.  Keeps only non-dominated alternatives.
+    if journeys:
+        journeys.sort(key=lambda j: (-j.departure, j.arrival, j.transfers))
+        filtered: list = []
+        for j in journeys:
+            if not any(
+                d.departure >= j.departure
+                and d.arrival <= j.arrival
+                and d.transfers <= j.transfers
+                and (d.departure, d.arrival, d.transfers) != (j.departure, j.arrival, j.transfers)
+                for d in filtered
+            ):
+                filtered.append(j)
+        journeys = filtered
 
     # Tri : §8.2 — par défaut le moins de correspondances d'abord (même trajet
     # plus long) ; sinon par départ ou par durée (« le plus court de la
@@ -602,7 +871,49 @@ def journeys(
                         jd["legs"][li]["real_price"] = {
                             k: info[k] for k in ("line", "from", "to", "min_eur", "max_eur", "day_eur", "day_company", "ok")
                         }
-                    jd["real_prices_disclaimer"] = REAL_PRICES_DISCLAIMER
+        # Notes de transparence : la résolution géographique (commune/GPS),
+        # l'extension « gares voisines » et les groupes multi-gares peuvent
+        # faire partir/arriver ailleurs que le lieu tapé. On l'affiche avec la
+        # distance réelle (corrigée cos(latitude)) plutôt que de deviner via
+        # un préfixe de nom (_is_same_city confondait « Saint-Jean-de-Luz » et
+        # « Saint-Jean-de-Bassel », ~900 km).
+        rail_legs = [l for l in j.legs if l.type != "walk"]
+        if origin_ctx and rail_legs:
+            idx = g.stop_index.get(rail_legs[0].from_id)
+            if idx is not None:
+                km = approx_distance_km(
+                    origin_ctx["lat"], origin_ctx["lon"], g.stops[idx].lat, g.stops[idx].lon
+                )
+                jd["origin_note"] = (
+                    f"Départ de {rail_legs[0].from_name} — {_fmt_km(km)} km de {origin_ctx['label']}"
+                )
+        if j.legs:
+            last_leg = j.legs[-1]
+            arr_idx = g.stop_index.get(last_leg.to_id)
+            if arr_idx is not None:
+                if dest_ctx is not None:
+                    km = approx_distance_km(
+                        dest_ctx["lat"], dest_ctx["lon"], g.stops[arr_idx].lat, g.stops[arr_idx].lon
+                    )
+                    jd["destination_note"] = (
+                        f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {dest_ctx['label']}"
+                    )
+                elif last_leg.to_id not in req_dest_ids:
+                    jd["destination_note"] = f"Arrivée à {last_leg.to_name} (gare voisine)"
+                elif dests_raw and last_leg.to_id != g.stops[dests_raw[0]].id:
+                    # Membre « secondaire » d'une résolution multi-gares
+                    # (ex. groupe besancon → F-C TGV à 8,4 km de Viotte).
+                    km = approx_distance_km(
+                        g.stops[dests_raw[0]].lat,
+                        g.stops[dests_raw[0]].lon,
+                        g.stops[arr_idx].lat,
+                        g.stops[arr_idx].lon,
+                    )
+                    if km > 2.0:
+                        to_label = to.removeprefix("place_group:")
+                        jd["destination_note"] = (
+                            f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {to_label}"
+                        )
         out.append(jd)
     resp = {"journeys": out}
     if real_prices:
@@ -610,6 +921,8 @@ def journeys(
             "provider": "tictactrip",
             "disclaimer": REAL_PRICES_DISCLAIMER,
         }
+        for jd in out:
+            jd["real_prices_disclaimer"] = REAL_PRICES_DISCLAIMER
     return resp
 
 
@@ -635,6 +948,82 @@ def _journey_alerts(alerts, j, g) -> list:
 
 def _alert_json(a) -> dict:
     return a.to_json()
+
+
+@app.get("/v1/trips/{trip_id:path}/schedule", tags=["horaires"])
+def trip_schedule(
+    trip_id: str,
+    date: str | None = Query(None, description="Date au format YYYY-MM-DD"),
+) -> dict:
+    engine = get_engine()
+    g = engine.graph
+    trip_idx = g.trip_index.get(trip_id)
+    if trip_idx is None:
+        raise _error(404, "TRIP_NOT_FOUND", f"Trip '{trip_id}' introuvable.")
+
+    ref_trip = g.trips[trip_idx]
+    route = g.routes[ref_trip.route]
+
+    d = _parse_date(date, g) if date else datetime.now().date()
+    date_int = int(d.strftime("%Y%m%d"))
+
+    def _same_dir(t1, t2) -> bool:
+        stops1 = [st.stop for st in t1.stop_times]
+        pos1 = {s: i for i, s in enumerate(stops1)}
+        common = [pos1[st.stop] for st in t2.stop_times if st.stop in pos1]
+        if len(common) >= 2:
+            return all(common[i] < common[i + 1] for i in range(len(common) - 1))
+        return (t1.stop_times[-1].stop == t2.stop_times[-1].stop or
+                t1.stop_times[0].stop == t2.stop_times[0].stop)
+
+    matching_trips = []
+    for ti, t in enumerate(g.trips):
+        if t.route == ref_trip.route:
+            services = g.service_dates.get(t.service_id, frozenset())
+            if date_int in services and _same_dir(ref_trip, t):
+                matching_trips.append(t)
+
+    matching_trips.sort(key=lambda t: t.stop_times[0].dep)
+
+    trips_out = []
+    for t in matching_trips:
+        st0 = t.stop_times[0]
+        st_end = t.stop_times[-1]
+        dep_h, dep_m = divmod(st0.dep, 60)
+        arr_h, arr_m = divmod(st_end.arr, 60)
+        stops_list = []
+        for st in t.stop_times:
+            s_obj = g.stops[st.stop]
+            s_arr_h, s_arr_m = divmod(st.arr, 60)
+            s_dep_h, s_dep_m = divmod(st.dep, 60)
+            stops_list.append({
+                "stop_id": _bare(s_obj.id),
+                "name": s_obj.name,
+                "arrival_time": f"{s_arr_h % 24:02d}:{s_arr_m:02d}",
+                "departure_time": f"{s_dep_h % 24:02d}:{s_dep_m:02d}",
+            })
+        trips_out.append({
+            "trip_id": t.id,
+            "vehicle_label": _vehicle_label(t.id),
+            "departure_time": f"{dep_h % 24:02d}:{dep_m:02d}",
+            "arrival_time": f"{arr_h % 24:02d}:{arr_m:02d}",
+            "origin_name": g.stops[st0.stop].name,
+            "destination_name": g.stops[st_end.stop].name,
+            "stops": stops_list,
+        })
+
+    last_stop_name = g.stops[ref_trip.stop_times[-1].stop].name
+    return {
+        "route_id": route.id,
+        "line": route.short_name,
+        "line_name": route.long_name,
+        "type": ref_trip.vehicle,
+        "vehicle_label": _vehicle_label(ref_trip.id),
+        "current_trip_id": ref_trip.id,
+        "date": d.isoformat(),
+        "direction_name": f"Direction {last_stop_name}",
+        "trips": trips_out,
+    }
 
 
 class _ShellStaticFiles(StaticFiles):

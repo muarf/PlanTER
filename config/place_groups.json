@@ -95,5 +95,14 @@
     "label": "Albi",
     "aliases": ["albi", "albi toutes gares", "albi tous", "toutes les gares de albi"],
     "stations": ["Albi Ville", "Albi Madeleine"]
+  },
+  "besancon": {
+    "label": "Besançon",
+    "aliases": ["besancon", "besançon", "besancon toutes gares", "besancon tous", "toutes les gares de besancon"],
+    "stations": [
+      "Besançon Viotte",
+      "Besançon Franche-Comté TGV",
+      "Besançon Mouillère"
+    ]
   }
 }

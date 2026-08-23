@@ -242,8 +242,10 @@ class RfnIndex:
     def hop_km(self, uic_a: str | None, uic_b: str | None) -> float | None:
         """Distance (km) entre deux gares le long du réseau RFN, ou None si
         introuvable (fallback haversine côté appelant)."""
-        if uic_a is None or uic_b is None or uic_a == uic_b:
-            return 0.0 if uic_a == uic_b else None
+        if uic_a is None or uic_b is None:
+            return None
+        if uic_a == uic_b:
+            return 0.0
         anchors_a = self.csv_anchors.get(uic_a)
         anchors_b = self.csv_anchors.get(uic_b)
         if not anchors_a or not anchors_b:

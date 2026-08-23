@@ -44,6 +44,7 @@ log = logging.getLogger("gtfs_rt")
 
 DEFAULT_URL = "https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-trip-updates"
 ALERTS_URL = "https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-service-alerts"
+LIO_URL = "https://lio.2cloud.app/api/gtfsrt/2.0/tripupdates/LIO65-6765-2617-7480/bin"
 POLL_INTERVAL_S = 120  # toutes les 2 min
 HTTP_TIMEOUT_S = 30
 
@@ -85,9 +86,13 @@ class RealtimeFeed:
 
 def _to_stop_idx(graph: Graph, stop_id: str) -> Optional[int]:
     m = _STOPPOINT_RE.search(stop_id)
-    if not m:
-        return None
-    return graph.stop_index.get(f"StopArea:OCE{m.group(1)}")
+    if m:
+        # SNCF TER: "StopPoint:OCETrain TER-87723197" -> StopArea:OCE87723197
+        return graph.stop_index.get(f"StopArea:OCE{m.group(1)}")
+    # Bus liO: stop_id numérique "4803216" -> BusStop:4803216
+    if stop_id.isdigit():
+        return graph.stop_index.get(f"BusStop:{stop_id}")
+    return None
 
 
 def _ts_to_ymd(ts: int) -> int | None:
@@ -139,8 +144,6 @@ def parse_trip_updates(payload: bytes, graph: Graph) -> RealtimeFeed:
         if not tue.HasField("trip"):
             continue
         trip_id = tue.trip.trip_id
-        if ":TER:" not in trip_id:
-            continue
         # Trip non reconnu du graphe -> ignoré (ex. date hors couverture).
         if trip_id not in graph.trip_index:
             continue
@@ -349,11 +352,13 @@ class RealtimePoller:
         url: str = DEFAULT_URL,
         alerts_url: str = ALERTS_URL,
         interval_s: int = POLL_INTERVAL_S,
+        extra_trip_urls: list[str] | None = None,
     ):
         self.graph = graph
         self.url = url
         self.alerts_url = alerts_url
         self.interval_s = interval_s
+        self.extra_trip_urls = extra_trip_urls or []
         self.feed = RealtimeFeed()
         self.alerts = RealtimeAlerts()
         self._lock = threading.Lock()
@@ -384,6 +389,14 @@ class RealtimePoller:
         while not self._stop.is_set():
             try:
                 feed = fetch_trip_updates(self.graph, self.url)
+                # Merge additional trip-update feeds (e.g. liO buses)
+                for extra_url in self.extra_trip_urls:
+                    try:
+                        extra = fetch_trip_updates(self.graph, extra_url)
+                        feed.trip_delays.update(extra.trip_delays)
+                        feed.cancelled.update(extra.cancelled)
+                    except Exception:
+                        log.warning("GTFS-RT: échec du fetch %s", extra_url, exc_info=True)
                 with self._lock:
                     self.feed = feed
                 log.info("GTFS-RT: %d trips retardés, %d supprimés (age %ss)",

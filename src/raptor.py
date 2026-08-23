@@ -83,6 +83,7 @@ class Leg:
             "line": self.line,
             "line_name": self.line_name,
             "vehicle_label": self.vehicle_label,
+            "trip_id": self.trip_id,
             "delay_min": self.delay_min,
             "from": {"stop_area_id": self.from_id, "name": self.from_name, "time": _iso(d, self.from_time)},
             "to": {"stop_area_id": self.to_id, "name": self.to_name, "time": _iso(d, self.to_time)},
@@ -137,7 +138,11 @@ class RaptorEngine:
                 self._route_stops[ridx] = sorted(stops)
                 self._route_stop_sets[ridx] = frozenset(stops)
         self._active_cache: dict[int, list[int]] = {}
-        self._views_cache: dict[tuple[int, str], dict[int, list[tuple[int, list]]]] = {}
+        self._views_cache: dict[tuple, dict[int, list[tuple[int, list]]]] = {}
+        self._trip_stop_pos: dict[tuple[int, int], int] = {}
+        for tidx, trip in enumerate(graph.trips):
+            for pos, st in enumerate(trip.stop_times):
+                self._trip_stop_pos[(tidx, st.stop)] = pos
 
     # ------------------------------------------------------------- vues
     def active_trips(self, date: int) -> list[int]:
@@ -151,6 +156,7 @@ class RaptorEngine:
         vehicle: str,
         mirror: bool = False,
         realtime: Optional[object] = None,
+        region_filter: Optional[set[int]] = None,
     ) -> dict[int, list[tuple[int, list]]]:
         """Trips actifs filtrés par mode, indexés par route.
 
@@ -161,7 +167,7 @@ class RaptorEngine:
         horaires et exclut les trains supprimés. Les retards > 0 sont ajoutés à
         chaque arrêt concerné du trip (un train en avance n'est pas avancé).
         """
-        key = (date, vehicle, mirror, bool(realtime))
+        key = (date, vehicle, mirror, bool(realtime), frozenset(region_filter) if region_filter else None)
         if realtime is None and key in self._views_cache:
             return self._views_cache[key]
         rt = realtime.snapshot() if realtime is not None else None
@@ -169,6 +175,12 @@ class RaptorEngine:
         for trip_idx in self.active_trips(date):
             trip = self.graph.trips[trip_idx]
             if vehicle == "train_only" and trip.vehicle != "train":
+                continue
+            if vehicle == "bus" and trip.vehicle != "bus":
+                continue
+            if vehicle == "bus_train" and trip.vehicle not in ("train", "bus"):
+                continue
+            if region_filter and trip.route not in region_filter:
                 continue
             if rt is not None:
                 if (trip.id, date) in rt.cancelled:
@@ -212,6 +224,7 @@ class RaptorEngine:
         t0: int,
         max_transfers: int,
         horizon: int,
+        mirror: bool = False,
     ):
         """Balayage par rounds.
 
@@ -234,7 +247,9 @@ class RaptorEngine:
             if a in origin_set and arr[b] > t0 + minutes:
                 arr[b] = t0 + minutes
                 transfer_walk[b] = (a, t0 + minutes)
-                marked[b] = t0 + minutes
+                # l'embarquement depuis une marche d'origine doit lui aussi
+                # respecter la correspondance minimum de la gare (§5.3)
+                marked[b] = t0 + minutes + graph.min_transfer[b]
 
         arr_by_round: list[list[float]] = []
         round_parents: list[dict[int, tuple[int, int]]] = []
@@ -257,14 +272,13 @@ class RaptorEngine:
                         break
                     # positions des arrêts marqués dans cette vue
                     for s, bt in marked_on_route:
-                        for i in range(len(view)):
-                            if view[i][0] == s:
-                                break
-                        else:
+                        fpos = self._trip_stop_pos.get((trip_idx, s))
+                        if fpos is None:
                             continue
-                        if view[i][2] < bt:
+                        idx = len(view) - 1 - fpos if mirror else fpos
+                        if idx >= len(view) or view[idx][2] < bt:
                             continue
-                        for j in range(i + 1, len(view)):
+                        for j in range(idx + 1, len(view)):
                             a2 = view[j][0]
                             at = view[j][1]
                             if at < arr[a2]:
@@ -303,7 +317,7 @@ class RaptorEngine:
     ) -> list[Journey]:
         views = self._views(date, vehicle, mirror=False, realtime=realtime)
         arr_by_round, round_parents, transfer_walk = self._rounds(
-            views, origins, dests, t0, max_transfers, t0 + HORIZON_MIN
+            views, origins, dests, t0, max_transfers, t0 + HORIZON_MIN, mirror=False
         )
         return self._pareto_journeys(
             arr_by_round, round_parents, transfer_walk, origins, dests, t0,
@@ -321,6 +335,7 @@ class RaptorEngine:
         vehicle: str = "all",
         realtime: Optional[object] = None,
         slice_min: int = 180,
+        region_filter: Optional[set[int]] = None,
     ) -> list[Journey]:
         """RAPTOR « large » (départ au plus tôt) : renvoie l'ensemble des
         départs utiles depuis t0 (horizon 36 h), triés par (départ, arrivée).
@@ -331,12 +346,18 @@ class RaptorEngine:
         le même K7 que le 11:06) est dominé et perdu. Le balayage par tranches
         (`slice_min`) puis la révélation en relançant le balayage au départ+1
         de chaque trajet découvert rendent ces départs (voir `_sweep_wide`)."""
-        views = self._views(date, vehicle, mirror=False, realtime=realtime)
+        views = self._views(date, vehicle, mirror=False, realtime=realtime, region_filter=region_filter)
+        # Adaptive slice_min: more trips -> wider slices to stay fast
+        n_trips = sum(len(tv) for tv in views.values())
+        if n_trips > 20000:
+            slice_min = max(slice_min, 360)
+        if n_trips > 40000:
+            slice_min = max(slice_min, 720)
         rt = realtime.snapshot() if realtime is not None else None
         return self._sweep_wide(
             views, origins, dests, t0, t0 + HORIZON_MIN, max_transfers,
-            date, mirror=False, rt=rt, slice_min=slice_min,
-            horizon=lambda start: start + HORIZON_MIN,
+            vehicle=vehicle, date=date, mirror=False, realtime=rt,
+            slice_min=slice_min, reveal=True, region_filter=region_filter,
         )
 
     def _sweep_wide(
@@ -347,12 +368,13 @@ class RaptorEngine:
         start0: int,
         stop0: int,
         max_transfers: int,
+        vehicle: str,
         date: int,
         mirror: bool,
-        rt: Optional[object],
+        realtime: Optional[object],
         slice_min: int,
-        horizon,
-        reveal: bool = True,
+        reveal: bool,
+        region_filter: Optional[set[int]] = None,
     ) -> list[Journey]:
         """Cœur du balayage « large » (§6.4) : tranches fixes toutes les
         `slice_min` minutes, puis révélation des départs suivants.
@@ -377,11 +399,11 @@ class RaptorEngine:
 
         def run(start: int) -> None:
             arr_by_round, round_parents, transfer_walk = self._rounds(
-                views, origins, dests, start, max_transfers, horizon(start)
+                views, origins, dests, start, max_transfers, start + HORIZON_MIN, mirror=mirror
             )
             for j in self._pareto_journeys(
                 arr_by_round, round_parents, transfer_walk, origins, dests, start,
-                date=date, mirror=mirror, realtime=rt,
+                date=date, mirror=mirror, realtime=realtime,
             ):
                 key = (j.departure, j.arrival, j.transfers,
                        tuple((l.trip_id, l.from_id, l.to_id) for l in j.legs))
@@ -425,7 +447,7 @@ class RaptorEngine:
         t0 = MAXT - deadline
         views = self._views(date, vehicle, mirror=True, realtime=realtime)
         arr_by_round, round_parents, transfer_walk = self._rounds(
-            views, dests, origins, t0, max_transfers, MAXT
+            views, dests, origins, t0, max_transfers, MAXT, mirror=True
         )
         return self._pareto_journeys(
             arr_by_round, round_parents, transfer_walk, dests, origins, t0,
@@ -443,20 +465,21 @@ class RaptorEngine:
         vehicle: str = "all",
         realtime: Optional[object] = None,
         slice_min: int = 180,
+        region_filter: Optional[set[int]] = None,
     ) -> list[Journey]:
         """ArriveBy « large » : équivalent miroir de `depart_after_wide`
         (récupère les trajets rapides arrivant avant la limite, mêmes si leur
         départ est tôt). Tranches du temps renversé, sans révélation — voir
         `_sweep_wide` pour la justification."""
         t0 = MAXT - deadline
-        views = self._views(date, vehicle, mirror=True, realtime=realtime)
+        views = self._views(date, vehicle, mirror=True, realtime=realtime, region_filter=region_filter)
         rt = realtime.snapshot() if realtime is not None else None
         # temps renversé : on scanne du plus tard (départ miroir le plus tôt)
         # vers le plus tôt, en tranches.
         return self._sweep_wide(
             views, dests, origins, t0, MAXT, max_transfers,
-            date, mirror=True, rt=rt, slice_min=slice_min,
-            horizon=lambda start: MAXT, reveal=False,
+            vehicle=vehicle, date=date, mirror=True, realtime=rt,
+            slice_min=slice_min, reveal=False, region_filter=region_filter,
         )
 
     # ------------------------------------------------------------- Pareto
@@ -628,9 +651,25 @@ class RaptorEngine:
         graph = self.graph
         minutes = graph.transfer_edges[(a, b)]
         if mirror:
+            # Temps miroir : le segment a→b du balayage renversé correspond
+            # physiquement à une marche b→a en heures réelles (on « remonte »
+            # l'arc de correspondance). Les extrémités sont donc permutées.
             to_time_real = MAXT - to_time
-        else:
-            to_time_real = to_time
+            return Leg(
+                type="walk",
+                route_id="",
+                line="",
+                line_name="",
+                vehicle_label="",
+                trip_id="",
+                from_id=graph.stops[b].id,
+                from_name=graph.stops[b].name,
+                from_time=to_time_real - minutes,
+                to_id=graph.stops[a].id,
+                to_name=graph.stops[a].name,
+                to_time=to_time_real,
+            )
+        to_time_real = MAXT - to_time if mirror else to_time
         return Leg(
             type="walk",
             route_id="",

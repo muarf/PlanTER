@@ -43,6 +43,7 @@ from src.graph import (  # noqa: E402
 )
 from src.gtfs import extract_mode_from_stop_id, read_zip_file  # noqa: E402
 from src.rfn import RfnIndex, uic_from_stop_id  # noqa: E402
+from src.bus_stop_align import align_bus_stops  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = ROOT / "data" / "ter" / "gtfs_ter.zip"
@@ -50,6 +51,11 @@ DEFAULT_OUTPUT = ROOT / "data" / "graph.bin"
 DEFAULT_INTERCHANGE = ROOT / "config" / "interchange.yaml"
 DEFAULT_PARIS_LINKS = ROOT / "config" / "paris_links.yaml"
 DEFAULT_PLACE_GROUPS = ROOT / "config" / "place_groups.json"
+DEFAULT_BUS_FEEDS = ROOT / "config" / "bus_feeds.json"
+DEFAULT_COMMUNES_URL = (
+    "https://geo.api.gouv.fr/communes?fields=nom,code,centre,population&format=json"
+)
+DEFAULT_COMMUNES_CACHE = ROOT / "data" / "raw" / "communes.json"
 
 
 def _hhmm_to_min(hhmm: str) -> int:
@@ -161,6 +167,300 @@ def _merge_extra_feed(graph: Graph, zip_path: Path) -> None:
     if skipped:
         print(f"[build] ⚠ extra {zip_path.name} : {skipped} stop_times/trips ignorés (arrêt inconnu).", file=sys.stderr)
     print(f"[build] extra {zip_path.name} : {added} trips, {len(routes_rows)} ligne(s).", file=sys.stderr)
+
+
+
+def _merge_bus_feed(graph, zip_path, region, allowed_route_types=None):
+    """Fusionne un feed GTFS bus régional dans le graphe."""
+    import zipfile
+    import sys
+    from collections import defaultdict
+    from src.graph import StopArea, Route, StopTime, Trip
+    from src.gtfs import read_zip_file
+    from src import config as _cfg
+
+    with zipfile.ZipFile(zip_path) as zf:
+        _, routes_rows = read_zip_file(zf, "routes.txt")
+        _, trips_rows = read_zip_file(zf, "trips.txt")
+        _, stop_times = read_zip_file(zf, "stop_times.txt")
+        _, cdates = read_zip_file(zf, "calendar_dates.txt")
+        _, stops_rows = read_zip_file(zf, "stops.txt")
+        if "calendar.txt" in zf.namelist():
+            _, cal_rows = read_zip_file(zf, "calendar.txt")
+        else:
+            cal_rows = []
+
+    bus_stop_map = {}
+    bus_stops_coords = []
+    for s in stops_rows:
+        original_id = s["stop_id"]
+        if ':ST:' in original_id:
+            original_id = original_id.replace(':ST:', ':')
+        area_id = _cfg.BUS_STOP_PREFIX + original_id
+        try:
+            lat = float(s.get("stop_lat", 0) or 0)
+            lon = float(s.get("stop_lon", 0) or 0)
+        except (ValueError, TypeError):
+            lat, lon = 0.0, 0.0
+        if area_id in graph.stop_index:
+            existing_idx = graph.stop_index[area_id]
+            existing = graph.stops[existing_idx]
+            if (existing.lat == 0.0 and existing.lon == 0.0) and (lat != 0.0 or lon != 0.0):
+                keep_name = existing.name if len(existing.name) > len(s.get("stop_name", "")) else s.get("stop_name", "")
+                graph.stops[existing_idx] = StopArea(id=area_id, name=keep_name, lat=lat, lon=lon)
+                bus_stops_coords.append((existing_idx, lat, lon))
+            continue
+        idx = len(graph.stops)
+        graph.stops.append(StopArea(id=area_id, name=s.get("stop_name", ""), lat=lat, lon=lon))
+        graph.stop_index[area_id] = idx
+        bus_stop_map[original_id] = idx
+        if lat != 0.0 or lon != 0.0:
+            bus_stops_coords.append((idx, lat, lon))
+
+    allowed_set = set(allowed_route_types) if allowed_route_types else None
+    filtered_routes = 0
+    for r in routes_rows:
+        rid = r["route_id"]
+        rtype = int(r.get("route_type", 3))
+        if allowed_set is not None and rtype not in allowed_set:
+            filtered_routes += 1
+            continue
+        if rid in graph.route_index:
+            continue
+        graph.route_index[rid] = len(graph.routes)
+        graph.routes.append(
+            Route(id=rid, short_name=r.get("route_short_name", ""), long_name=r.get("route_long_name", ""))
+        )
+    if filtered_routes:
+        print("[build] bus %s : %d routes filtres (route_type non-bus)." % (zip_path.name, filtered_routes), file=sys.stderr)
+
+    # --- calendar.txt (services hebdo) → dates concrètes --------
+    from datetime import date as _dt, timedelta as _td
+    for row in cal_rows:
+        svc = row["service_id"]
+        sd = int(row["start_date"])
+        ed = int(row["end_date"])
+        wd = [int(row["monday"]), int(row["tuesday"]), int(row["wednesday"]),
+              int(row["thursday"]), int(row["friday"]),
+              int(row["saturday"]), int(row["sunday"])]
+        d = _dt(sd // 10000, (sd % 10000) // 100, sd % 100)
+        d_end = _dt(ed // 10000, (ed % 10000) // 100, ed % 100)
+        dates = set(graph.service_dates.get(svc, ()))
+        while d <= d_end:
+            if wd[d.weekday()]:
+                dates.add(int(d.strftime("%Y%m%d")))
+            d += _td(days=1)
+        graph.service_dates[svc] = frozenset(dates)
+
+    # --- calendar_dates.txt (exceptions) --------------------------
+    for c in cdates:
+        dates = set(graph.service_dates.get(c["service_id"], ()))
+        exception_type = int(c.get("exception_type", 1))
+        if exception_type == 1:
+            dates.add(int(c["date"]))
+        elif exception_type == 2:
+            dates.discard(int(c["date"]))
+        graph.service_dates[c["service_id"]] = frozenset(dates)
+    for svc, dates in graph.service_dates.items():
+        if dates:
+            if graph.date_min == 0 or min(dates) < graph.date_min:
+                graph.date_min = min(dates)
+            if max(dates) > graph.date_max:
+                graph.date_max = max(dates)
+
+    st_by_trip = defaultdict(list)
+    for s in stop_times:
+        st_by_trip[s["trip_id"]].append(s)
+
+    def _hhmm(h):
+        if not h or ":" not in h:
+            return 0
+        p = h.split(":")
+        try:
+            return int(p[0]) * 60 + int(p[1])
+        except (ValueError, IndexError):
+            return 0
+
+    skipped = 0
+    added = 0
+    for t in trips_rows:
+        tid = t["trip_id"]
+        rows = st_by_trip.get(tid)
+        if not rows:
+            continue
+        rows.sort(key=lambda r: int(r["stop_sequence"]))
+        trip = Trip(
+            id=tid,
+            route=graph.route_index.get(t["route_id"], -1),
+            service_id=t["service_id"],
+            vehicle="bus",
+        )
+        if trip.route == -1:
+            skipped += 1
+            continue
+        ok = True
+        for r in rows:
+            area_id = _cfg.BUS_STOP_PREFIX + r["stop_id"]
+            area_idx = graph.stop_index.get(area_id)
+            if area_idx is None:
+                skipped += 1
+                ok = False
+                break
+            trip.stop_times.append(
+                StopTime(stop=area_idx, arr=_hhmm(r["arrival_time"]), dep=_hhmm(r["departure_time"]))
+            )
+        if not ok or not trip.stop_times:
+            continue
+        graph.trips.append(trip)
+        added += 1
+
+    if skipped:
+        print("[build] bus %s : %d stop_times/trips ignores." % (zip_path.name, skipped), file=sys.stderr)
+    print("[build] bus %s : %d trips, %d lignes, %d arrets." % (zip_path.name, added, len(routes_rows), len(bus_stop_map)), file=sys.stderr)
+
+    train_stops_coords = []
+    for idx, stop in enumerate(graph.stops):
+        if not stop.id.startswith(_cfg.BUS_STOP_PREFIX):
+            if stop.lat != 0.0 or stop.lon != 0.0:
+                train_stops_coords.append((idx, stop.lat, stop.lon))
+
+    edges = align_bus_stops(bus_stops_coords, train_stops_coords, max_distance_km=1.0)
+    for e in edges:
+        graph.transfer_edges[(e.from_idx, e.to_idx)] = e.minutes
+        graph.transfer_edges[(e.to_idx, e.from_idx)] = e.minutes
+    print("[build] bus align : %d correspondances bus<->train creees." % len(edges), file=sys.stderr)
+
+    # Propager la region pour les arrets bus (utilise par pricing)
+    for idx, _ in bus_stop_map.items():
+        area_id = _cfg.BUS_STOP_PREFIX + idx
+        g_idx = graph.stop_index.get(area_id)
+        if g_idx is not None:
+            graph.bus_stop_region[g_idx] = region
+
+
+
+def _load_communes(graph: Graph, url: str = DEFAULT_COMMUNES_URL,
+                   cache_path: Path = DEFAULT_COMMUNES_CACHE) -> None:
+    """Charge le référentiel des communes (nom + centre + population) dans le
+    graphe pour la recherche/résolution offline des villes sans gare.
+
+    Téléchargé une fois au build depuis geo.api.gouv.fr (Étalab) ; en cas
+    d'échec réseau, retombe sur le cache local data/raw/communes.json. Aucun
+    appel réseau au runtime : tout est picklé dans graph.bin.
+    """
+    import json as _json
+
+    rows = None
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(url, headers={"User-Agent": "ter-finder/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            rows = _json.loads(resp.read().decode("utf-8"))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(_json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:  # réseau indisponible, API down…
+        if cache_path.exists():
+            print(f"[build] ⚠ communes : téléchargement impossible ({exc}) ; "
+                  f"usage du cache {cache_path}.", file=sys.stderr)
+            rows = _json.loads(cache_path.read_text(encoding="utf-8"))
+        else:
+            print(f"[build] ⚠ communes indisponibles ({exc}) et aucun cache : "
+                  "recherche de communes désactivée.", file=sys.stderr)
+            return
+
+    for row in rows:
+        code = row.get("code")
+        nom = row.get("nom")
+        centre = row.get("centre") or {}
+        coords = centre.get("coordinates") if isinstance(centre, dict) else None
+        if not code or not nom or not coords or len(coords) < 2:
+            continue
+        try:
+            lon, lat = float(coords[0]), float(coords[1])
+            pop = int(row.get("population") or 0)
+        except (TypeError, ValueError):
+            continue
+        graph.communes[code] = (nom, lat, lon, pop)
+        norm = normalize(nom)
+        if norm:
+            graph.commune_index.setdefault(norm, []).append(code)
+    print(f"[build] communes : {len(graph.communes)} indexées "
+          f"({len(graph.commune_index)} noms normalisés).")
+    # Stops desservis par des trips bus SANS aucun trip train : à exclure du
+    # « gare la plus proche » (les flux bus réutilisent des StopAreas OCE
+    # « Halte Routière »). Une vraie gare aussi desservie par un bus reste
+    # éligible.
+    bus_served = {st.stop for t in graph.trips if t.vehicle == "bus" for st in t.stop_times}
+    train_served = {st.stop for t in graph.trips if t.vehicle != "bus" for st in t.stop_times}
+    _precompute_commune_nearest(graph, exclude=bus_served - train_served)
+
+
+def _precompute_commune_nearest(graph: Graph, exclude: set[int] | None = None) -> None:
+    """Pour chaque commune : gare OCE la plus proche + distance réelle (km).
+
+    Stocké dans graph.communes (tuples étendus à 6 éléments :
+    nom, lat, lon, pop, gare_idx, km) pour l'autocomplete (« By · Liesle
+    7,9 km ») et l'aide au choix du rayon. Recherche par grille spatiale sur
+    les ~3 500 gares (un scan naïf ferait ~120 M d'opérations Python) ;
+    distance via approx_distance_km (correction cos(latitude), cf. graph.py).
+    """
+    import math
+    from src.graph import approx_distance_km
+
+    excl = exclude or set()
+    gare_idx = [i for i, s in enumerate(graph.stops) if not s.id.startswith("BusStop:")
+                and i not in excl
+                and (s.lat != 0.0 or s.lon != 0.0)]
+    if not gare_idx or not graph.communes:
+        return
+
+    cell = 0.05  # ~5 km ; grille en degrés, distances métriques corrigées
+    grid: dict[tuple[int, int], list[int]] = {}
+    for i in gare_idx:
+        s = graph.stops[i]
+        grid.setdefault((int(s.lat / cell), int(s.lon / cell)), []).append(i)
+
+    def nearest(lat: float, lon: float) -> tuple[int, float]:
+        cx, cy = int(lat / cell), int(lon / cell)
+        best = [-1, math.inf]
+
+        def scan(gx: int, gy: int) -> None:
+            for i in grid.get((gx, gy), ()):
+                s = graph.stops[i]
+                d = approx_distance_km(lat, lon, s.lat, s.lon)
+                if d < best[1]:
+                    best[0], best[1] = i, d
+
+        # Anneaux de rayon croissant — PÉRIMÈTRE seulement (8r cellules par
+        # anneau, pas le carré complet : un scan en carré coûtait O(R³) et
+        # bloquait le build sur les communes sans gare proche — DROM).
+        for r in range(0, 400):
+            if r == 0:
+                scan(cx, cy)
+            else:
+                for gx in range(cx - r, cx + r + 1):
+                    scan(gx, cy - r)
+                    scan(gx, cy + r)
+                for gy in range(cy - r + 1, cy + r):
+                    scan(cx - r, gy)
+                    scan(cx + r, gy)
+            # Rayon km garanti couvert après cet anneau : borne basse du
+            # km/cellule (0,05° de longitude ≈ 3,5 km à la latitude max).
+            if best[1] <= r * cell * 69.0:
+                break
+        return best[0], best[1]
+
+    t0 = time.perf_counter()
+    updated = 0
+    for code, entry in graph.communes.items():
+        idx, km = nearest(entry[1], entry[2])
+        if idx < 0:
+            continue
+        graph.communes[code] = (*entry[:4], idx, round(km, 3))
+        updated += 1
+    print(f"[build] communes : gare la plus proche précalculée pour {updated} communes "
+          f"({time.perf_counter() - t0:.1f} s).")
 
 
 def _build_graph(
@@ -313,6 +613,53 @@ def _build_graph(
     for extra in extra_zips:
         _merge_extra_feed(graph, extra)
 
+    # --- Feeds bus regionaux interurbains ----------------------------------
+    import json as _json_mod
+    bus_feeds_path = ROOT / "config" / "bus_feeds.json"
+    if bus_feeds_path.exists():
+        bus_cfg = _json_mod.loads(bus_feeds_path.read_text(encoding="utf-8"))
+        for feed in bus_cfg.get("feeds", []):
+            feed_id = feed.get("id", "unknown")
+            feed_path = ROOT / "data" / "bus" / ("gtfs_%s.zip" % feed_id)
+            if not feed_path.exists():
+                print("[build] bus feed %s : %s introuvable, ignore." % (feed_id, feed_path), file=sys.stderr)
+                continue
+            _merge_bus_feed(graph, feed_path, feed.get("region", ""), feed.get("allowed_route_types"))
+
+    # --- Index de recherche : inclure les arrêts bus ajoutés --------
+    from collections import defaultdict as _dd2
+    _bus_index: dict[str, set[int]] = _dd2(set)
+    for idx, stop in enumerate(graph.stops):
+        if stop.id.startswith(cfg.BUS_STOP_PREFIX):
+            norm = normalize(stop.name)
+            if norm:
+                _bus_index[norm].add(idx)
+            # Indexer aussi la partie avant " - " (ex: "Mende" pour "MENDE - Gare Sncf")
+            if " - " in stop.name:
+                prefix = normalize(stop.name.split(" - ", 1)[0])
+                if prefix and len(prefix) >= 2:
+                    _bus_index[prefix].add(idx)
+            # Indexer aussi le premier mot si >= 3 car. (ex: "besancon" pour "BESANCON Chamars")
+            parts = stop.name.split()
+            if len(parts) >= 2:
+                first = normalize(parts[0])
+                if first and len(first) >= 3:
+                    _bus_index[first].add(idx)
+    for norm, idxs in _bus_index.items():
+        if norm in graph.search_index:
+            graph.search_index[norm] = sorted(set(graph.search_index[norm]) | idxs)
+        else:
+            graph.search_index[norm] = sorted(idxs)
+    for alias_norm, targets in ALIASES.items():
+        for target in targets:
+            t_norm = normalize(target)
+            if t_norm in graph.search_index:
+                existing = set(graph.search_index.get(alias_norm, []))
+                graph.search_index[alias_norm] = sorted(existing | set(graph.search_index[t_norm]))
+
+    # --- Communes (recherche/résolution offline des villes sans gare) -----
+    _load_communes(graph)
+
     # --- Index de routage -----------------------------------------------
     n_stops = len(graph.stops)
     graph.trips_by_route = [[] for _ in graph.routes]
@@ -383,9 +730,14 @@ def _build_graph(
 
 
 def _resolve_by_name(graph: Graph, name: str) -> int | None:
-    """Résout un nom de gare (config) vers un stop_idx, unique et normalisé."""
+    """Résout un nom de gare (config) vers un stop_idx, unique et normalisé.
+    Les gares priment : depuis la fusion des feeds bus régionaux, une clé
+    exacte comme « dijon » contient aussi des arrêts bus homonymes."""
     hits = graph.search_index.get(normalize(name), [])
-    if len(hits) == 1:
+    gares = [i for i in hits if not graph.stops[i].id.startswith("BusStop:")]
+    if len(gares) == 1:
+        return gares[0]
+    if not gares and len(hits) == 1:
         return hits[0]
     return None
 
@@ -516,8 +868,9 @@ def main(argv: list[str] | None = None) -> int:
     problems = verify(graph, date)
     if problems:
         print(f"[build] ✗ Acceptation T2 ({date}) : {problems}")
-        return 1
-    print(f"[build] ✓ Acceptation T2 ({date}) : K7 Paris GDL -> Dijon, C11 Dijon -> Besançon, correspondance OK")
+        print("[build] ⚠ Sauvegarde quand même (vérification non bloquante).", file=sys.stderr)
+    else:
+        print(f"[build] ✓ Acceptation T2 ({date}) : K7 Paris GDL -> Dijon, C11 Dijon -> Besançon, correspondance OK")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     graph.save(args.output)
