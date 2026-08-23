@@ -1,7 +1,7 @@
 /* PlanTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v11";
+const CACHE = "ter-finder-v23";
 const SHELL = [
   "/",
   "/styles.css",
@@ -9,12 +9,13 @@ const SHELL = [
   "/cards.html",
   "/privacy.html",
   "/about.html",
+  "/covoit.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png"
 ];
 
-const API_CACHE = "ter-finder-api-v5";
+const API_CACHE = "ter-finder-api-v12";
 const API_MAX_ENTRIES = 100;
 
 self.addEventListener("install", (event) => {
@@ -89,6 +90,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  /* Horaires de ligne : frais d'abord (le cache n'est qu'un secours offline).
+     staleWhileRevalidate servait une copie périmée au premier clic. */
+  if (/^\/v1\/trips\/.+\/schedule$/.test(url.pathname)) {
+    event.respondWith(networkFirst(req, API_CACHE));
+    return;
+  }
+
+  /* Jamais de cache : clé publique RSA (régénérée à chaque démarrage) et
+     défis PoW (TTL 60 s, à usage unique côté client). */
+  if (url.pathname === "/v1/crypto/pubkey" || url.pathname === "/v1/challenge") {
+    return;
+  }
+
+  /* Autres GET /v1/* (recherche de gares…) : cache-first révalidé. */
   if (url.pathname.startsWith("/v1/")) {
     event.respondWith(staleWhileRevalidate(req, API_CACHE));
     return;
@@ -98,7 +113,8 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/styles.css") || url.pathname.startsWith("/app.js") ||
       url.pathname.startsWith("/icon-") || url.pathname === "/manifest.webmanifest" ||
       url.pathname === "/cards.html" || url.pathname === "/privacy.html" ||
-      url.pathname === "/about.html") {
+      url.pathname === "/about.html",
+  "/covoit.html") {
     event.respondWith(networkFirst(req, CACHE));
   }
 });

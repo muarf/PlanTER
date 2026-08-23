@@ -22,6 +22,36 @@ body {
   line-height: 1.45;
 }
 
+.onion-banner {
+  background: #00382d;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  padding: 0.45rem 1rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  line-height: 1.35;
+}
+.onion-banner a {
+  color: #6ee7b7;
+  text-decoration: underline;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+.onion-banner a:hover {
+  color: #a7f3d0;
+}
+
+html.is-onion .onion-banner,
+.is-onion .onion-banner {
+  display: none !important;
+}
+
 .site-header {
   background: var(--ter);
   color: #fff;
@@ -92,6 +122,13 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 }
 .suggestions li { padding: 0.55rem 0.6rem; cursor: pointer; }
 .suggestions li:hover, .suggestions li[aria-selected="true"] { background: #e6f4f0; }
+.suggestions li.ac-section {
+  padding: 0.3rem 0.6rem; cursor: default; font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: #5b6b66;
+  background: #f4f7f6; border-top: 1px solid var(--border);
+}
+.suggestions li.ac-section:first-child { border-top: 0; }
+.suggestions li.ac-section:hover { background: #f4f7f6; }
 
 #search-button {
   padding: 0.7rem 1rem; border: 0; border-radius: 8px; font-size: 1rem;
@@ -149,6 +186,7 @@ input:focus, select:focus { outline: 2px solid var(--focus); outline-offset: 1px
 .badge-train { background: #e0f2ec; color: var(--ter-dark); }
 .badge-car { background: #e8ecf6; color: #253a68; }
 .badge-tram { background: #f3ead8; color: #6a5210; }
+.badge-bus { background: #fde8d0; color: #8a4a00; }
 .badge-walk { background: #e9e9e9; color: #444; }
 .badge-next-day { background: #fde8e6; color: #8c2d26; }
 .badge-delay { background: #fff3cd; color: #8a6100; }
@@ -576,3 +614,265 @@ dl.off a { color: var(--ter-dark); }
 .ticket-chip.ticket-total { background: #1a7a5a; color: #fff; }
 .ticket-chip.ticket-total:hover { background: #145e45; }
 
+/* ------------------------------------------------- MODALE HORAIRES DE LIGNE */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+.modal-backdrop[hidden] {
+  display: none;
+  opacity: 0;
+}
+.modal-container {
+  background: #ffffff;
+  border-radius: 12px;
+  max-width: 580px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  animation: modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  background: #f8fafc;
+}
+.modal-line-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--ter-dark);
+  background: #e6f4f0;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  margin-bottom: 0.3rem;
+}
+.modal-line-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.3;
+}
+.modal-line-direction {
+  font-size: 0.82rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+}
+.modal-close {
+  background: none;
+  border: 0;
+  font-size: 1.2rem;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.modal-close:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.modal-tabs-wrapper {
+  padding: 0.75rem 1.25rem 0.6rem;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+.modal-tabs-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.4rem;
+}
+.modal-tabs {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+}
+.modal-tab-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.modal-tab-btn:hover {
+  border-color: var(--ter);
+  color: var(--ter-dark);
+}
+.modal-tab-btn.active {
+  background: var(--ter);
+  border-color: var(--ter);
+  color: #ffffff;
+}
+.modal-tab-btn .current-star {
+  font-size: 0.75rem;
+}
+.modal-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.modal-stops-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  position: relative;
+}
+.modal-stop-item {
+  position: relative;
+  padding-left: 2rem;
+  padding-bottom: 1.1rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.modal-stop-item:last-child {
+  padding-bottom: 0;
+}
+.modal-stop-item::before {
+  content: "";
+  position: absolute;
+  left: 0.45rem;
+  top: 0.5rem;
+  bottom: -0.6rem;
+  width: 2px;
+  background: #cbd5e1;
+}
+.modal-stop-item:last-child::before {
+  display: none;
+}
+.modal-stop-dot {
+  position: absolute;
+  left: 0.2rem;
+  top: 0.2rem;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2.5px solid #94a3b8;
+  z-index: 2;
+}
+.modal-stop-item.highlight .modal-stop-dot {
+  border-color: var(--ter);
+  background: var(--ter);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+}
+.modal-stop-name {
+  font-size: 0.9rem;
+  color: #1e293b;
+  font-weight: 500;
+  padding-right: 0.5rem;
+}
+.modal-stop-item.highlight .modal-stop-name {
+  font-weight: 800;
+  color: var(--ter-dark);
+}
+.modal-stop-time {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+/* Curseur cliquable sur les legs de transport */
+.timeline-leg-details.clickable {
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.timeline-leg-details.clickable:hover {
+  background: #f1f5f9;
+  border-color: var(--ter);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+.leg-schedule-hint {
+  font-size: 0.73rem;
+  color: var(--ter-dark);
+  font-weight: 600;
+  margin-top: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+
+/* ---------------------------------------- rayon gares (double curseur) */
+.geo-btn {
+  position: absolute; right: 0.45rem; top: 1.7rem;
+  border: 0; background: none; cursor: pointer; font-size: 1rem;
+  padding: 0.2rem; line-height: 1; border-radius: 6px; opacity: 0.75;
+}
+.geo-btn:hover { opacity: 1; background: #eef4f2; }
+.geo-btn:disabled { opacity: 0.35; cursor: wait; }
+.field input[type="text"] { padding-right: 2rem; }
+
+.range-field .field-label small, #radius-label { color: var(--muted); font-weight: 500; }
+.dual-range {
+  position: relative; height: 1.6rem; display: flex; align-items: center;
+}
+.dual-range-track, .dual-range-fill {
+  position: absolute; height: 5px; border-radius: 3px; pointer-events: none;
+}
+.dual-range-track { left: 0; right: 0; background: #dbe5e1; }
+.dual-range-fill { background: var(--ter, #1a3a8f); }
+.dual-range input[type="range"] {
+  position: absolute; left: 0; right: 0; width: 100%; margin: 0;
+  background: none; pointer-events: none; -webkit-appearance: none; appearance: none;
+}
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; pointer-events: auto;
+  width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--ter, #1a3a8f); box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: grab;
+}
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  border: 2px solid var(--ter, #1a3a8f); box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: grab;
+}
+.dual-range-ends {
+  display: flex; justify-content: space-between;
+  font-size: 0.72rem; color: var(--muted);
+}
+
+/* Sous-titre d'autocomplete (gare la plus proche des communes) */
+.suggestions li .ac-main { display: block; }
+.suggestions li .ac-sub {
+  display: block; font-size: 0.74rem; color: var(--muted); margin-top: 0.1rem;
+}
