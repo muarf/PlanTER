@@ -178,7 +178,7 @@ class RaptorEngine:
                 continue
             if vehicle == "bus" and trip.vehicle != "bus":
                 continue
-            if vehicle == "bus_train" and trip.vehicle not in ("train", "bus"):
+            if vehicle == "bus_train" and trip.vehicle not in ("train", "bus", "car"):
                 continue
             if region_filter and trip.route not in region_filter:
                 continue
