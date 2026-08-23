@@ -38,7 +38,7 @@ class GtfsRtTestCase(unittest.TestCase):
         """Un trip réel du graphe (Dijon -> Besançon, C1) et ses arrêts."""
         idx = self.g.resolve_place("Dijon")[0]
         trip_idx = None
-        for tidx in self.g.active_trip_indices(20260810):
+        for tidx in self.g.active_trip_indices(20260914):
             t = self.g.trips[tidx]
             if t.stop_times and t.stop_times[0].stop == idx and len(t.stop_times) > 2:
                 trip_idx = tidx
@@ -58,7 +58,7 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260810"
+        e.trip_update.trip.start_date = "20260914"
         u1 = e.trip_update.stop_time_update.add()
         u1.stop_id = f"StopPoint:OCETrain TER-{uic1}"
         u1.arrival.delay = 600
@@ -67,7 +67,7 @@ class GtfsRtTestCase(unittest.TestCase):
         u2.departure.delay = 900
 
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        key = (trip.id, 20260810)
+        key = (trip.id, 20260914)
         self.assertIn(key, feed.trip_delays)
         delays = feed.trip_delays[key]
         self.assertEqual(delays[stops[0].stop], 10)
@@ -79,10 +79,10 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260810"
+        e.trip_update.trip.start_date = "20260914"
         e.trip_update.trip.schedule_relationship = _pb2.TripDescriptor.CANCELED
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        key = (trip.id, 20260810)
+        key = (trip.id, 20260914)
         self.assertIn(key, feed.cancelled)
         self.assertNotIn(key, feed.trip_delays)
 
@@ -103,7 +103,7 @@ class GtfsRtTestCase(unittest.TestCase):
         fm = _feed_message()
         e = fm.entity.add()
         e.id = "1"
-        e.trip_update.trip.trip_id = "OCEIC123:Intercites:FR::ZZZ::0:0:0:0:0:20260810"
+        e.trip_update.trip.trip_id = "OCEIC123:Intercites:FR::ZZZ::0:0:0:0:0:20260914"
         e.trip_update.stop_time_update.add().arrival.delay = 60
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
         self.assertEqual(feed.trip_delays, {})
@@ -115,21 +115,21 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260810"
+        e.trip_update.trip.start_date = "20260914"
         u = e.trip_update.stop_time_update.add()
         u.stop_id = "StopPoint:OCETrain TER-00000000"  # UIC inexistant
         u.arrival.delay = 600
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
         # trip connu mais aucun retard mappable -> absent de trip_delays
-        self.assertNotIn((trip.id, 20260810), feed.trip_delays)
+        self.assertNotIn((trip.id, 20260914), feed.trip_delays)
 
     def test_snapshot_isole(self):
-        feed = gtfs_rt.RealtimeFeed(trip_delays={("t1", 20260810): {1: 5}}, cancelled={("t2", 20260810)})
+        feed = gtfs_rt.RealtimeFeed(trip_delays={("t1", 20260914): {1: 5}}, cancelled={("t2", 20260914)})
         snap = feed.snapshot()
-        snap.trip_delays[("t1", 20260810)][1] = 99
-        snap.cancelled.add(("t3", 20260810))
-        self.assertEqual(feed.trip_delays[("t1", 20260810)][1], 5)
-        self.assertNotIn(("t3", 20260810), feed.cancelled)
+        snap.trip_delays[("t1", 20260914)][1] = 99
+        snap.cancelled.add(("t3", 20260914))
+        self.assertEqual(feed.trip_delays[("t1", 20260914)][1], 5)
+        self.assertNotIn(("t3", 20260914), feed.cancelled)
 
     def test_age_fraicheur(self):
         import time
@@ -152,7 +152,7 @@ class ServiceAlertsTestCase(unittest.TestCase):
     @staticmethod
     def _real_trip(g):
         """Un trip réel du graphe (numéro de train exploitable)."""
-        for tidx in g.active_trip_indices(20260810):
+        for tidx in g.active_trip_indices(20260914):
             t = g.trips[tidx]
             if t.stop_times and len(t.stop_times) > 2:
                 return t

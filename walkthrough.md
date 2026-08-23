@@ -1571,4 +1571,95 @@ utilisateur (case à cocher) plutôt qu'un comportement systématique.
   - 118 tests unitaires au vert (`OK`).
   - Redémarrage du service `ter-finder-pricing.service`.
 
+## 46. T12 — Masquage automatique du Découpage Malin lorsqu'il est non rentable (19/08/2026)
+
+**Contexte.** Sur les trajets à nombreuses correspondances ou traversant plusieurs frontières administratives sans plafonnement régional (ex. Paris Bercy → Mende via les Cévennes, ou Lyon → Marseille), le morcellement en billets courts successifs fait perdre la dégressivité kilométrique nationale. Le découpage revenait alors plus cher que le billet direct (130,05 € vs 121,00 €), créant de la confusion pour l'utilisateur.
+
+**Modifications.**
+- **Frontend (`web/app.js`, `web/sw.js`)** :
+  - `renderStyleA` : La carte **« ✂️ Découpage Malin »** n'est désormais rendue **que** si le gain est strictement positif (`p.split && p.split.profitable`, soit économie > 0,50 €).
+  - Lorsque le découpage est plus cher ou égal, l'option est totalement masquée et seule la carte **« Billet Direct »** est affichée.
+  - Incrémentation du cache Service Worker (`ter-finder-v13` / `ter-finder-api-v6`).
+- **Validation** :
+  - Tests sur Paris → Mende : Billet Direct à 121,00 € affiché seul, aucun découpage proposé.
+  - Tests sur Paris → Lyon : Découpage Malin affiché à 56,80 € avec économie de −8,20 €.
+  - Redémarrage du service `ter-finder-pricing.service`.
+
+## 47. Correction de l'indexation RAPTOR (thread-safety et position des arrêts) & Prise en compte de « Prioriser les moins de correspondances » (20/08/2026)
+
+**Problème identifié.** Lors de la recherche **Paris → Besançon Viotte** à 07h00 :
+1. Le moteur ne trouvait pas le train direct de 07h34 (K7 Paris Gare de Lyon → Dijon + C11 Dijon → Besançon Viotte).
+2. L'index interne des positions d'arrêt `self._stop_pos` dans `src/raptor.py` était muté dynamiquement dans `_views()` uniquement quand `realtime is None` et écrasé lors des recherches miroirs (`mirror=True`), rendant le routage instable lors des requêtes concurrentes avec temps réel.
+3. Le paramètre `prioritize_fewer_transfers` envoyé par le frontend n'était pas interprété par l'API `src/api.py`.
+
+**Modifications.**
+- **Moteur RAPTOR (`src/raptor.py`)** :
+  - Précalcul statique et immuable de `self._trip_stop_pos` dans `__init__` pour tous les trips du graphe.
+  - Suppression de la mutation concurrente dans `_views()`.
+  - Transmission du drapeau `mirror` à `_rounds()` pour un calcul de position $O(1)$ déterministe.
+- **API (`src/api.py`)** :
+  - Prise en compte de `params.get("prioritize_fewer_transfers")` pour forcer le tri `sort = "transfers"`.
+- **Frontend / Service Worker (`web/sw.js`, `web/index.html`)** :
+  - Incrémentation du cache vers `ter-finder-v14` / `ter-finder-api-v7` et `app.js?v=14`.
+- **Validation** :
+  - Recherche Paris → Besançon Viotte le 21/08/2026 à 07h00 :
+    - 1er : **07h34 → 12h04** *(1 chgt, K7 + C11)*
+    - 2e : **13h24 → 17h44** *(1 chgt, K7 + C1)*
+    - 3e : **17h27 → 22h04** *(1 chgt, K7 + C11)*
+  - 34 tests unitaires au vert (`OK`).
+  - Redémarrage du service `ter-finder-pricing.service`.
+
+## 48. Filtrage de l'extension de rayon à la même commune & Option « Inclure les gares proches (< 5 km) » (20/08/2026)
+
+**Contexte.** L'extension automatique à 5 km du lieu de destination incluait systématiquement les gares ferroviaires des communes limitrophes même si l'utilisateur demandait un village précis (ex. arriver à la gare de Byans à 2,9 km lorsqu'on cherche Quingey).
+
+**Modifications.**
+- **Backend (`src/api.py`)** :
+  - Détection automatique de la commune de destination (`_is_same_city`).
+  - Par défaut : l'extension 5 km est **restreinte aux arrêts de la même commune / ville** (ex. pour couvrir tous les arrêts et gares d'une agglomération comme Mende, Paris ou Lyon) ainsi qu'aux jonctions immédiates (< 200 m).
+  - Nouveau paramètre `expand_nearby: bool` : lorsqu'il est activé, l'extension autorise les gares des communes voisines jusqu'à 5 km.
+  - Ajout d'une mention `destination_note` (`📍 Arrivée à Byans (gare voisine)`) lorsque le trajet aboutit dans une commune limitrophe.
+- **Frontend (`web/index.html`, `web/app.js`, `web/sw.js`)** :
+  - Nouvelle case à cocher : `☑ Inclure les gares proches (< 5 km)`.
+  - Affichage d'un badge bleu informatif sur la carte de trajet en cas d'arrivée dans une gare voisine.
+  - Incrémentation du cache Service Worker vers `ter-finder-v15` / `ter-finder-api-v8`.
+- **Validation** :
+  - Recherche **Paris → Quingey** sans l'option : uniquement les 2 trajets arrivant dans Quingey via le bus 207.
+  - Recherche **Paris → Quingey** avec l'option : 4 trajets arrivant à la gare de Byans (2,9 km) avec le badge `📍 Arrivée à Byans (gare voisine)`.
+  - 34 tests unitaires au vert (`OK`).
+  - Service redémarré.
+
+## 49. Intégration des tarifs forfaitaires de bus régionaux & Ticket unitaire Mobigo à 2,00 € (20/08/2026)
+
+**Contexte.** Les tronçons en bus régional (ex. lignes Mobigo 205 et 207 dans le Doubs / BFC) étaient jusqu'alors tarifés selon la formule kilométrique ferroviaire TER (avec minimum à 6 € ou paliers jusqu'à 41 €), aboutissant à des estimations irréalistes (11,20 € pour un trajet intra-urbain ou 119 € pour Paris-Quingey). En réalité, les réseaux de cars régionaux appliquent des tickets unitaires forfaitaires (ex. **2,00 €** le ticket unitaire Mobigo en Bourgogne-Franche-Comté).
+
+**Modifications.**
+- **Moteur de tarification (`src/pricing.py`)** :
+  - Ajout de la table `REGIONAL_BUS_FARES` avec le tarif unitaire officiel Mobigo à **2,00 €** (`viamobigo.fr`), liO à 2,00 €, Rémi / Zou / Fluo à 3,00 €, Aléop à 2,50 €, etc.
+  - Séparation des legs ferroviaires (barème TER / cartes de réduction) et des legs routiers (forfait ticket de bus régional unitaire).
+  - Détail leg par leg : chaque trajet de bus affiche désormais son tarif forfaitaire exact (2,00 €).
+- **Validation** :
+  - Trajet Besançon Viotte → Quingey (Bus 205 + Bus 207) : tarif exact de **4,00 €** (2,00 € + 2,00 €) au lieu de 11,20 €.
+  - 34 tests unitaires au vert (`OK`).
+  - Service redémarré.
+
+## 50. Modale interactive des horaires de ligne & grille complète des arrêts (20/08/2026)
+
+**Contexte.** Dans la vue détaillée d'un itinéraire, l'utilisateur souhaitait pouvoir cliquer sur un train ou un car/bus pour afficher tous les horaires de la journée pour cette ligne (avec un onglet par départ) ainsi que la liste exhaustive de tous les arrêts et heures de passage.
+
+**Modifications.**
+- **Backend (`src/api.py`, `src/raptor.py`)** :
+  - Inclusion de `trip_id` dans la sérialisation des legs (`Leg.to_json`).
+  - Nouvel endpoint `GET /v1/trips/{trip_id}/schedule?date=YYYY-MM-DD` :
+    - Recherche de tous les départs circulant le même jour sur la même ligne et dans la même direction.
+    - Extraction chronologique de tous les arrêts avec heures de départ et d'arrivée.
+- **Frontend (`web/index.html`, `web/styles.css`, `web/app.js`, `web/sw.js`)** :
+  - Rendu cliquable des blocs train et bus avec curseur interactif et mention `🕒 Voir tous les horaires de la ligne`.
+  - Modale responsive avec backdrop flou, en-tête de ligne, barre d'onglets défilables par horaire (étoile ★ sur le départ du trajet sélectionné), et timeline complète des stations avec mise en valeur des gares de montée/descente de l'utilisateur.
+  - Incrémentation du cache Service Worker vers `ter-finder-v16` / `ter-finder-api-v9`.
+- **Validation** :
+  - Test unitaire automatisé `test_trip_schedule_train_and_bus` validé (`OK`).
+  - Tests end-to-end Playwright validés sur TER C1 (13 départs) et Bus 283 (7 départs) avec captures d'écran de vérification.
+  - Service redémarré.
+
 

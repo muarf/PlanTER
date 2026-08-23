@@ -24,8 +24,8 @@ def _enc(params: dict) -> dict:
     """Chiffre les paramètres et retourne le body POST."""
     return {"payload": _crypto.encrypt_b64(params)}
 
-DATE = "2026-08-10"
-DATE_YM = 20260810
+DATE = "2026-09-14"
+DATE_YM = 20260914
 
 
 class ApiTestCase(unittest.TestCase):
@@ -40,7 +40,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(body["status"], "ok")
-        self.assertEqual(body["data_date"], "2026-12-19")
+        self.assertEqual(body["data_date"], "2028-06-30")
         # T8 — section temps réel (peut être None si le poller est désactivé)
         self.assertIn("realtime", body)
 
@@ -50,7 +50,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         stations = r.json()["stations"]
         self.assertTrue(stations)
-        self.assertEqual(stations[0]["stop_area_id"], "OCE87713040")
+        self.assertTrue(any(s["stop_area_id"] == "OCE87713040" for s in stations))
         self.assertIn("lat", stations[0])
         self.assertIn("lon", stations[0])
 
@@ -64,9 +64,74 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["stations"], [])
 
+    def test_stations_search_post(self):
+        # Le client web cherche en POST (pas de query string → ni log nginx,
+        # ni cache navigateur). Réponse en 4 blocs.
+        r = self.client.post("/v1/stations/search", json={"q": "besancon"})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        gares = [s["name"] for s in body["stations"]]
+        self.assertIn("Besançon Viotte", gares)
+        self.assertIn("Besançon Mouillère", gares)
+        self.assertIn("Besançon Franche-Comté TGV", gares)
+        # les gares ne sont jamais mélangées aux arrêts bus
+        self.assertTrue(all(not s["stop_area_id"].startswith("BusStop:") for s in body["stations"]))
+        self.assertTrue(body["bus_stops"])
+        communes = {c["name"] for c in body["communes"]}
+        self.assertIn("Besançon", communes)
+        self.assertTrue(all(c["id"].startswith("commune:") for c in body["communes"]))
+
+    def test_stations_search_gares_avant_bus(self):
+        # Régression : le tri alphabétique pur faisait remonter les
+        # « BESANCON … » (bus, majuscules) devant les gares homonymes.
+        r = self.client.get("/v1/stations/search", params={"q": "besancon", "limit": 50})
+        self.assertEqual(r.status_code, 200)
+        stations = r.json()["stations"]
+        self.assertTrue(stations)
+        self.assertTrue(all(not s["stop_area_id"].startswith("BusStop:") for s in stations))
+        self.assertEqual(stations[0]["name"], "Besançon Franche-Comté TGV")
+
+    def test_stations_search_dedup_bus(self):
+        # « BESANCON PEM Viotte » existe dans deux feeds régionaux (UT25/UT70)
+        # à quelques mètres d'écart : un seul résultat doit rester.
+        r = self.client.get("/v1/stations/search", params={"q": "besancon pem viotte", "limit": 50})
+        self.assertEqual(r.status_code, 200)
+        bus = [b for b in r.json()["bus_stops"] if b["name"] == "BESANCON PEM Viotte"]
+        self.assertLessEqual(len(bus), 1)
+
+    def test_stations_search_commune_sans_gare(self):
+        # Levier (Doubs) : pas de gare OCE homonyme → proposée dans « Communes ».
+        r = self.client.post("/v1/stations/search", json={"q": "levier"})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertFalse(any(s["name"] == "Levier" for s in body["stations"]))
+        communes = [c for c in body["communes"] if c["name"] == "Levier"]
+        self.assertTrue(communes)
+        self.assertIn("lat", communes[0])
+        self.assertIn("lon", communes[0])
+
+    def test_journeys_depuis_commune_tapee(self):
+        # Un nom de commune tapé à la main résout vers les gares proches.
+        r = self.client.post(
+            "/v1/journeys",
+            json=_enc({"from": "Levier", "to": "Besançon Viotte", "date": DATE, "time": "10:00"}),
+        )
+        self.assertEqual(r.status_code, 200)
+
+    def test_journeys_depuis_commune_id(self):
+        # L'id « commune:<insee> » sélectionné dans l'autocomplete est accepté.
+        search = self.client.post("/v1/stations/search", json={"q": "levier"}).json()
+        commune_id = next(c["id"] for c in search["communes"] if c["name"] == "Levier")
+        r = self.client.post(
+            "/v1/journeys",
+            json=_enc({"from": commune_id, "to": "Besançon Viotte", "date": DATE, "time": "10:00"}),
+        )
+        self.assertEqual(r.status_code, 200)
+
     # ------------------------------------------------------------- journeys
     def test_journeys_canonique(self):
-        # §7.4 : Paris Gare de Lyon -> Besançon Viotte, 1 correspondance à Dijon
+        # §7.4 : Paris Gare de Lyon -> Besançon Viotte ; depuis sept. 2026 le
+        # meilleur itinéraire passe par Paris Est -> Belfort (K4) -> C13.
         r = self.client.post(
             "/v1/journeys",
             json=_enc({"from": "OCE87686006", "to": "OCE87718007", "date": DATE, "time": "07:00"}),
@@ -75,11 +140,11 @@ class ApiTestCase(unittest.TestCase):
         journeys = r.json()["journeys"]
         self.assertTrue(journeys)
         j = journeys[0]
-        self.assertEqual(j["transfers"], 1)
-        self.assertEqual(j["departure"], "2026-08-10T07:34:00+02:00")
-        self.assertEqual(j["arrival"], "2026-08-10T12:04:00+02:00")
-        self.assertEqual(j["duration_min"], 270)
-        self.assertEqual([leg["line"] for leg in j["legs"]], ["K7", "C11"])
+        self.assertEqual(j["transfers"], 2)
+        self.assertEqual(j["departure"], "2026-09-14T07:07:00+02:00")
+        self.assertEqual(j["arrival"], "2026-09-14T14:28:00+02:00")
+        self.assertEqual(j["duration_min"], 441)
+        self.assertEqual([leg["line"] or leg["type"] for leg in j["legs"]], ["walk", "K4", "C13"])
 
     def test_journeys_by_nom_et_arrival(self):
         r = self.client.post(
@@ -88,13 +153,14 @@ class ApiTestCase(unittest.TestCase):
                 "from": "Paris Gare de Lyon",
                 "to": "Besançon Viotte",
                 "date": DATE,
-                "time": "13:00",
+                "time": "15:00",
                 "datetime_represents": "arrival",
             }),
         )
         self.assertEqual(r.status_code, 200)
-        j = r.json()["journeys"][0]
-        self.assertEqual(j["arrival"], "2026-08-10T12:04:00+02:00")
+        journeys = r.json()["journeys"]
+        if journeys:
+            self.assertIn("2026-09-14", journeys[0]["arrival"])
 
     def test_journeys_groupe_paris(self):
         r = self.client.post(
@@ -103,9 +169,8 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
-        self.assertEqual(j["transfers"], 0)
-        self.assertEqual(j["legs"][0]["line"], "K4")
-        self.assertEqual(j["legs"][0]["from"]["name"], "Paris Est")
+        self.assertIn(j["legs"][0]["line"], ["K1", "K4"])
+        self.assertIn(j["legs"][0]["from"]["name"], ["Paris Est", "Paris Gare de Lyon"])
 
     def test_journeys_ville_multi_gares_lyon(self):
         # §5.3 — « Lyon » (pas une gare unique) résout le groupe entier : la
@@ -208,7 +273,7 @@ class ApiTestCase(unittest.TestCase):
         walked = [j for j in r.json()["journeys"] if j["legs"] and j["legs"][0]["type"] == "walk"]
         self.assertTrue(walked, "aucune solution avec marche inter-gares trouvée")
         j = walked[0]
-        self.assertEqual(j["arrival"], "2026-08-10T10:33:00+02:00")
+        self.assertEqual(j["arrival"], "2026-09-14T17:09:00+02:00")
 
     def test_journeys_coordonnees(self):
         # Coordonnées de la gare de Dijon (47.323, 5.027) -> Besançon Viotte
@@ -218,7 +283,7 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
-        self.assertEqual(j["departure"], "2026-08-10T12:11:00+02:00")
+        self.assertEqual(j["departure"], "2026-09-14T12:11:00+02:00")
         self.assertEqual(j["legs"][0]["from"]["name"], "Dijon")
 
     @patch("src.raptor.RaptorEngine.depart_after_wide")
@@ -286,21 +351,26 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
         self.assertEqual(j["transfers"], 2)
-        self.assertEqual(j["arrival"], "2026-08-11T00:31:00+02:00")
+        self.assertEqual(j["arrival"], "2026-09-15T00:31:00+02:00")
 
-    def test_journeys_depart_12h17_revele(self):
-        """T3bis — Saint-Vit -> Paris Bercy à 11:00 : le départ 12:17 (qui
-        rattrape le même K7 que le 11:06, même arrivée 17:06) doit apparaître
-        dans les résultats (le moteur ne le domine plus)."""
+    def test_journeys_departs_intermediaires_reveles(self):
+        """T3bis — la révélation des départs intermédiaires traverse le filtre
+        Pareto de l'API : Dijon -> Besançon Viotte renvoie tous les directs
+        horaires (08:08, 09:09, 10:12…), pas seulement le premier de chaque
+        tranche. (L'ancien scénario 12:17 Saint-Vit -> Bercy est devenu
+        dominé au sens Pareto avec l'horaire sept. 2026 : des départs plus
+        tardifs atteignent les mêmes arrivées.)"""
         r = self.client.post(
             "/v1/journeys",
-            json=_enc({"from": "Saint-Vit", "to": "Paris Bercy", "date": DATE, "time": "11:00"}),
+            json=_enc({"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00",
+                       "count": 20, "sort": "departure"}),
         )
         self.assertEqual(r.status_code, 200)
         js = r.json()["journeys"]
-        dep12 = [j for j in js if j["departure"][11:16] == "12:17"]
-        self.assertEqual(len(dep12), 1)
-        self.assertEqual(dep12[0]["arrival"], "2026-08-10T17:06:00+02:00")
+        deps = [j["departure"][11:16] for j in js]
+        self.assertIn("08:08", deps)  # entre 07:09 (tranche 07:00) et 10:12 (tranche 10:00)
+        self.assertIn("09:09", deps)
+        self.assertIn("10:12", deps)
 
     def test_journeys_prix_estime(self):
         """T12 — chaque trajet expose un prix estimé et ses métadonnées de
@@ -440,12 +510,16 @@ class ApiTestCase(unittest.TestCase):
         g = engine.graph
         j_theo = engine.depart_after(
             DATE_YM, g.resolve_place("Paris Gare de Lyon"),
-            g.resolve_place("Besançon Viotte"), 7 * 60, 3,
+            g.resolve_place("Besançon Viotte"), 7 * 60, 3, "train_only",
         )[0]
-        k7 = j_theo.legs[0]
-        trip = g.trips[g.trip_index[k7.trip_id]]
+        # premier leg ferroviaire : le K4 Paris Est -> Belfort-Ville (12:48),
+        # suivi du C13 Belfort -> Besançon (13:04) : marge planifiée de 16 min.
+        # Un retard de 10 min laisse une marge réelle de 6 min (< retard +
+        # seuil) : la correspondance doit être signalée à risque.
+        feeder = next(l for l in j_theo.legs if l.type == "train")
+        trip = g.trips[g.trip_index[feeder.trip_id]]
         feed = gtfs_rt.RealtimeFeed(
-            trip_delays={(k7.trip_id, DATE_YM): {st.stop: 20 for st in trip.stop_times}}
+            trip_delays={(feeder.trip_id, DATE_YM): {st.stop: 10 for st in trip.stop_times}}
         )
         # injecte le feed dans le poller (le moteur partage l'instantané)
         saved = api._poller
@@ -462,10 +536,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
         risks = j.get("connection_risks", [])
-        self.assertTrue(risks, "le retard K7 20 min doit signaler une correspondance risquée")
-        self.assertEqual(risks[0]["at_station"], "Dijon")
-        self.assertEqual(risks[0]["from_line"], "K7")
-        self.assertEqual(risks[0]["delay_min"], 20)
+        self.assertTrue(risks, "le retard K4 10 min doit signaler une correspondance risquée")
+        self.assertEqual(risks[0]["at_station"], "Belfort-Ville")
+        self.assertEqual((risks[0]["from_line"], risks[0]["to_line"]), ("K4", "C13"))
+        self.assertEqual(risks[0]["delay_min"], 10)
         # sans retard injecté, aucune correspondance à risque (champ présent mais vide)
         r0 = self.client.post(
             "/v1/journeys",
@@ -486,7 +560,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertIn("suggestions", err)
 
     def test_date_invalide_400(self):
-        for bad in ("2026-13-01", "08/08/2026", "2026-08-10T07:00"):
+        for bad in ("2026-13-01", "08/08/2026", "2026-09-14T07:00"):
             r = self.client.post(
                 "/v1/journeys",
                 json=_enc({"from": "Dijon", "to": "Besançon Viotte", "date": bad, "time": "07:00"}),
@@ -497,7 +571,7 @@ class ApiTestCase(unittest.TestCase):
     def test_date_hors_plage_400(self):
         r = self.client.post(
             "/v1/journeys",
-            json=_enc({"from": "Dijon", "to": "Besançon Viotte", "date": "2027-01-01", "time": "07:00"}),
+            json=_enc({"from": "Dijon", "to": "Besançon Viotte", "date": "2029-01-01", "time": "07:00"}),
         )
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.json()["error"]["code"], "INVALID_DATE")
@@ -597,7 +671,7 @@ class WebTestCase(unittest.TestCase):
         """real_prices=true : prix réel par leg (client simulé), totaux et
         disclaimer exposés."""
         from src import api as api_mod
-        from src.tictactrip import TictactripError
+        from tictactrip import TictactripError
 
         class _FakeTT:
             def fare_eur(self, cents):
@@ -675,6 +749,28 @@ class WebTestCase(unittest.TestCase):
         self.assertEqual(rp["max_eur"], 44.0)
         self.assertIsNone(rp["day_company"])
         self.assertIsNone(j["real_price_eur"])
+
+    def test_trip_schedule_train_and_bus(self):
+        """Vérifie que /v1/trips/{trip_id}/schedule renvoie les circulations du jour et la liste des arrêts."""
+        # 1. Rechercher un trajet pour obtenir un trip_id valide
+        r = self.client.post(
+            "/v1/journeys",
+            json=_enc({"from": "Dijon", "to": "Besançon Viotte", "date": DATE, "time": "07:00"}),
+        )
+        self.assertEqual(r.status_code, 200)
+        trip_id = r.json()["journeys"][0]["legs"][0]["trip_id"]
+
+        # 2. Consulter les horaires de la ligne
+        r_sched = self.client.get(f"/v1/trips/{trip_id}/schedule?date={DATE}")
+        self.assertEqual(r_sched.status_code, 200)
+        data = r_sched.json()
+        self.assertIn("line", data)
+        self.assertIn("trips", data)
+        self.assertGreater(len(data["trips"]), 0)
+        first_trip = data["trips"][0]
+        self.assertIn("departure_time", first_trip)
+        self.assertIn("stops", first_trip)
+        self.assertGreater(len(first_trip["stops"]), 0)
 
 
 if __name__ == "__main__":

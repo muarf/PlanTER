@@ -19,7 +19,7 @@ from src.pricing import PricingEngine
 from src.raptor import RaptorEngine
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
-DATE = 20260810
+DATE = 20260914
 
 # Ids Trainline (config/trainline_cards.json).
 BFC_26 = "5be729fcfc26caa921c53f6d836175d832c288ca"
@@ -290,22 +290,25 @@ class PricingTestCase(unittest.TestCase):
     # ------------------------------------------------------- §32 split intra-train
     ILLICO_SOLIDAIRE = "illico-solidaire"
 
-    def _k7_0734(self):
-        """Trajet Paris Gare de Lyon -> Lyon Part Dieu sur le TER K7 de 07h34."""
+    def _k7_paris_lyon(self):
+        """Trajet Paris Bercy -> Lyon Part Dieu sur le TER K7 de 15h35.
+
+        (Depuis l'horaire sept. 2026, le K7 ne part plus de Gare de Lyon le
+        matin ; les directs Paris -> Lyon partent de Bercy l'après-midi.)"""
         js = self.e.depart_after_wide(
-            DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Lyon Part Dieu"),
-            7 * 60, 2, "train_only", None,
+            DATE, self.resolve("Paris Bercy"), self.resolve("Lyon Part Dieu"),
+            14 * 60, 2, "train_only", None,
         )
         return next(
-            (j for j in js if j.legs and j.legs[0].line == "K7" and j.legs[0].from_time == 454),
+            (j for j in js if j.legs and j.legs[0].line == "K7" and j.legs[0].from_time == 15 * 60 + 35),
             None,
         )
 
     def test_k7_paris_lyon_jonction_macon(self):
-        # Le TER K7 de 07h34 traverse la BFC puis l'ARA : la jonction se situe
+        # Le TER K7 de 15h35 traverse la BFC puis l'ARA : la jonction se situe
         # à Mâcon (dernier arrêt BFC avant Belleville-sur-Saône, Rhône).
-        j = self._k7_0734()
-        self.assertIsNotNone(j, "TER K7 07:34 Paris GDL -> Lyon introuvable")
+        j = self._k7_paris_lyon()
+        self.assertIsNotNone(j, "TER K7 15:35 Paris Bercy -> Lyon introuvable")
         leg = j.legs[0]
         tidx = self.g.trip_index[leg.trip_id]
         segs = self.pe.trip_region_segments(tidx, self.g.stop_index[leg.from_id], self.g.stop_index[leg.to_id])
@@ -319,8 +322,8 @@ class PricingTestCase(unittest.TestCase):
         # Avec BFC solidaire + illico solidaire : le découpage à Mâcon est
         # annoncé, chaque segment est réduit par la carte de sa région, et le
         # prix mono-région (billet unique dégressif) reste inchangé.
-        j = self._k7_0734()
-        self.assertIsNotNone(j, "TER K7 07:34 introuvable")
+        j = self._k7_paris_lyon()
+        self.assertIsNotNone(j, "TER K7 15:35 introuvable")
         info = self.pe.journey_price(j, cards=[BFC_SOLIDAIRE, self.ILLICO_SOLIDAIRE])
         self.assertEqual(info["rule"], "mono_region")
         split = info["split"]
@@ -329,7 +332,7 @@ class PricingTestCase(unittest.TestCase):
         self.assertEqual(len(split["segments"]), 2)
         seg1, seg2 = split["segments"]
         self.assertEqual(seg1["region"], "Bourgogne-Franche-Comté")
-        self.assertEqual(seg1["from"]["name"], "Paris Gare de Lyon Hall 1 - 2")
+        self.assertEqual(seg1["from"]["name"], "Paris Bercy Bourg. Pays d'Auv.")
         self.assertEqual(seg1["to"]["name"], "Mâcon")
         self.assertEqual(seg2["region"], "Auvergne-Rhône-Alpes")
         self.assertEqual(seg2["from"]["name"], "Mâcon")
@@ -358,10 +361,10 @@ class PricingTestCase(unittest.TestCase):
 
     def test_paris_dijon_meme_train_pas_de_split(self):
         # Paris -> Dijon sur le même K7 ne traverse qu'une région utile (BFC) :
-        # aucun découpage annoncé.
+        # aucun découpage annoncé. (Depuis sept. 2026 le direct part de Bercy.)
         js = self.e.depart_after_wide(
-            DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Dijon"),
-            7 * 60, 1, "train_only", None,
+            DATE, self.resolve("Paris Bercy"), self.resolve("Dijon"),
+            14 * 60, 1, "train_only", None,
         )
         j = next((j for j in js if j.legs and j.legs[0].line == "K7"), None)
         self.assertIsNotNone(j, "K7 Paris -> Dijon introuvable")
@@ -462,8 +465,8 @@ class PricingTestCase(unittest.TestCase):
     def test_multi_leg_journey_with_split(self):
         # T12 — Trajet multi-legs où au moins un leg est split et l'autre non.
         # Le split doit contenir la totalité des segments du trajet de bout en bout.
-        j_k7 = self._k7_0734()
-        self.assertIsNotNone(j_k7, "TER K7 07:34 introuvable")
+        j_k7 = self._k7_paris_lyon()
+        self.assertIsNotNone(j_k7, "TER K7 15:35 introuvable")
         leg1 = j_k7.legs[0]
 
         js_lg = self.e.depart_after_wide(
@@ -484,7 +487,7 @@ class PricingTestCase(unittest.TestCase):
         split = info["split"]
         self.assertIsNotNone(split)
         self.assertEqual(len(split["segments"]), 3)
-        self.assertEqual(split["segments"][0]["from"]["name"], "Paris Gare de Lyon Hall 1 - 2")
+        self.assertEqual(split["segments"][0]["from"]["name"], "Paris Bercy Bourg. Pays d'Auv.")
         self.assertEqual(split["segments"][0]["to"]["name"], "Mâcon")
         self.assertEqual(split["segments"][1]["from"]["name"], "Mâcon")
         self.assertEqual(split["segments"][1]["to"]["name"], "Lyon Part Dieu")
