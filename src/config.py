@@ -7,6 +7,11 @@ TER ont été décommissionnés). Le filtrage TER est donc notre responsabilité
 
 GTFS_URL = "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip"
 
+# Lignes du Réseau Ferré National (SNCF Réseau) — distances PK dans rfn.py.
+# Évolue très rarement : téléchargé seulement si le fichier local est absent.
+RFN_URL = ("https://ressources.data.sncf.com/api/explore/v2.1/catalog/"
+           "datasets/formes-des-lignes-du-rfn/exports/json")
+
 # Taille minimale acceptable (en octets) : le zip fait ~4,6 Mo, on se garde
 # une marge large pour détecter un téléchargement incomplet.
 MIN_GTFS_SIZE_BYTES = 1_000_000

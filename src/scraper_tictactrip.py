@@ -8,7 +8,11 @@ import json
 import re
 import unicodedata
 from typing import Optional
-from playwright.async_api import async_playwright
+
+try:
+    from playwright.async_api import async_playwright
+except ImportError:  # outil autonome : playwright + chromium non installés
+    async_playwright = None
 
 def slugify(text: str) -> str:
     """Normalise le nom de la ville en slug d'URL (sans accents, sans majuscules)."""
@@ -27,6 +31,9 @@ async def get_tictactrip_real_price(orig: str, dest: str) -> Optional[float]:
     dest_slug = slugify(dest)
     
     url = f"https://www.tictactrip.eu/search/{orig_slug}/{dest_slug}"
+    if async_playwright is None:
+        print("[scraper_tictactrip] playwright non installé — scraping indisponible")
+        return None
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)

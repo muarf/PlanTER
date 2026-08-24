@@ -116,13 +116,40 @@ def download(url: str, out_dir: Path) -> tuple[Path, dict]:
     return target, metadata
 
 
+def download_rfn(out_path: Path) -> None:
+    """Télécharge les lignes du RFN (SNCF Réseau) si absentes.
+
+    Requises par src/rfn.py pour les distances PK ; le build du graphe
+    échoue sans elles. Évolue très rarement : on ne re-télécharge que sur
+    demande explicite (--rfn-force) ou fichier manquant.
+    """
+    print(f"[download] RFN lignes <- {config.RFN_URL}")
+    resp = requests.get(config.RFN_URL, timeout=300)
+    resp.raise_for_status()
+    recs = resp.json()
+    if not isinstance(recs, list) or not recs:
+        raise ValueError("Export RFN inattendu (pas une liste non vide)")
+    if not any(r.get("mnemo") == "EXPLOITE" for r in recs):
+        raise ValueError("Export RFN sans record EXPLOITE")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(recs), encoding="utf-8")
+    print(f"[download] RFN OK -> {out_path} ({out_path.stat().st_size} octets)")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Télécharge le GTFS SNCF")
     parser.add_argument("--url", default=config.GTFS_URL)
     parser.add_argument("--out", type=Path, default=DEFAULT_RAW_DIR)
+    parser.add_argument(
+        "--rfn-force", action="store_true",
+        help="re-télécharge data/rfn_lignes.json même s'il existe déjà",
+    )
     args = parser.parse_args(argv)
     try:
         download(args.url, args.out)
+        rfn_path = ROOT / "data" / "rfn_lignes.json"
+        if args.rfn_force or not rfn_path.exists():
+            download_rfn(rfn_path)
     except Exception as exc:  # noqa: BLE001
         print(f"[download] ERREUR : {exc}", file=sys.stderr)
         return 1

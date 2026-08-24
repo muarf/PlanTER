@@ -36,7 +36,7 @@ from src.graph import (
     normalize,
 )
 from src.raptor import RaptorEngine, _iso as _iso_min, _vehicle_label
-from src import gtfs_rt, scraper_tictactrip as tictactrip, trainline, trainline_cards
+from src import gtfs_rt, tictactrip, trainline, trainline_cards
 from src.pricing import PricingEngine
 from src.pow import PoWEngine
 from src.crypto import CryptoEngine

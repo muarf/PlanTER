@@ -166,6 +166,8 @@ tests/             pytest (moteur, tarification, API)
 ## Données
 
 - **GTFS SNCF** : horaires officiels (open data, licence ODbL) — trains régionaux.
+- **RFN (SNCF Réseau)** : lignes du réseau ferré national, utilisées pour calculer les distances entre gares par PK.
+- **Feeds bus régionaux** : réseaux urbains/interurbains ouverts, ajoutés aux correspondances TER+bus.
 - **Barèmes tarifaires** : extraits des CGV de chaque région (AURA, BFC, GE, Normandie, Occitanie, PACA, PdL…).
 - **Cartes de réduction** : catalogue régional des cartes TER.
 
