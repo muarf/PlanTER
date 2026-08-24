@@ -18,6 +18,21 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // NB : signingConfigs DOIT être déclaré avant buildTypes, qui y fait
+    // référence dès que KEYSTORE_PATH est présent (sinon « unknown property
+    // 'release' » à l'évaluation).
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -27,17 +42,6 @@ android {
             def keystorePath = System.getenv("KEYSTORE_PATH")
             if (keystorePath) {
                 signingConfig signingConfigs.release
-            }
-        }
-    }
-    signingConfigs {
-        release {
-            def keystorePath = System.getenv("KEYSTORE_PATH")
-            if (keystorePath) {
-                storeFile file(keystorePath)
-                storePassword System.getenv("KEYSTORE_PASSWORD")
-                keyAlias System.getenv("KEY_ALIAS")
-                keyPassword System.getenv("KEY_PASSWORD")
             }
         }
     }
