@@ -1,7 +1,7 @@
 /* PlanTER — service worker (T7 v2.1) : cache offline partiel. */
 "use strict";
 
-const CACHE = "ter-finder-v23";
+const CACHE = "ter-finder-v24";
 const SHELL = [
   "/",
   "/styles.css",
@@ -10,6 +10,7 @@ const SHELL = [
   "/privacy.html",
   "/about.html",
   "/covoit.html",
+  "/app.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png"

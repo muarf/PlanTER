@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Application Android de PlanTER : itinéraires 100 % TER hors navigateur.">
+  <title>App Android — PlanTER</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#1a3a8f">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <style>
+    .app-dl {
+      display: inline-block; padding: 0.7rem 1.2rem; border-radius: 10px;
+      background: #1a3a8f; color: #fff; text-decoration: none; font-weight: 700;
+    }
+    .app-dl:hover { background: #142c6e; }
+    .app-note { font-size: 0.85rem; color: #64748b; }
+    .app-fp {
+      word-break: break-all; font-size: 0.78rem; color: #475569;
+      background: #f1f5f9; border-radius: 6px; padding: 2px 6px;
+    }
+  </style>
+  <script>if(location.hostname.endsWith(".onion"))document.documentElement.classList.add("is-onion");</script>
+</head>
+<body>
+  <div class="onion-banner">
+    <span>🧅 Site disponible sur Tor :</span>
+    <a href="http://plantervsrlnvhrdqg467ef3hlt2qmytcmgpyewasqpg6fmfb6qwvzqd.onion">plantervsrlnvhrdqg467ef3hlt2qmytcmgpyewasqpg6fmfb6qwvzqd.onion</a>
+  </div>
+  <header class="site-header">
+    <h1>App Android</h1>
+    <p class="tagline"><a href="/" style="color:#fff">← Retour à PlanTER</a></p>
+  </header>
+
+  <main>
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px 10px;">
+      <h2 style="text-align: center; color: var(--primary-color, #1a3a8f); margin-bottom: 12px;">PlanTER, hors du navigateur</h2>
+      <p style="text-align:center; color:#475569; margin-bottom: 24px;">
+        Même moteur, mêmes données — mais en application : interface embarquée,
+        écran d'accueil, démarrage direct.
+      </p>
+
+      <section class="card" style="margin-bottom: 20px;">
+        <h3>Télécharger</h3>
+        <p style="text-align:center;">
+          <a class="app-dl" href="https://github.com/muarf/PlanTER/releases/latest/download/PlanTER-android-latest.apk">Télécharger l'APK</a>
+        </p>
+        <p style="text-align:center;" class="app-note">
+          <a href="https://github.com/muarf/PlanTER/releases">toutes les versions et checksums</a>
+        </p>
+      </section>
+
+      <section class="card" style="margin-bottom: 20px;">
+        <h3>Installation</h3>
+        <ol style="color:#475569; line-height:1.7;">
+          <li>Ouvre le fichier APK téléchargé.</li>
+          <li>Android demande d'autoriser l'installation depuis cette source : accepte une fois (l'app n'est pas sur le Play Store).</li>
+          <li>L'application s'installe comme les autres. C'est tout.</li>
+        </ol>
+      </section>
+
+      <section class="card" style="margin-bottom: 20px;">
+        <h3>Authenticité</h3>
+        <p class="app-note">
+          Vérifie l'empreinte de la clé de signature après installation
+          (Paramètres → Applications → PlanTER) :
+        </p>
+        <p><code class="app-fp">FB:3C:ED:F8:4A:6A:0F:44:52:BC:61:B9:A8:E3:A9:18:CC:20:27:65:62:8E:86:93:C2:1B:A5:60:36:A1:C0:0C</code></p>
+        <p class="app-note">
+          Chaque version est publiée avec son fichier <code>SHA256SUMS.txt</code>.
+          Une future diffusion via F-Droid sera signée par la clé F-Droid :
+          les signatures diffèrent entre sources, c'est normal — choisis-en une.
+        </p>
+      </section>
+
+      <section class="card" style="margin-bottom: 20px;">
+        <h3>Logiciel libre</h3>
+        <p class="app-note">
+          Application construite avec <a href="https://capacitorjs.com">Capacitor</a>,
+          code source inclus dans le dépôt
+          <a href="https://github.com/muarf/PlanTER">muarf/PlanTER</a>. Licence WTFPL.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <p>PlanTER — L'école buissonnière du rail.</p>
+  </footer>
+</body>
+</html>
