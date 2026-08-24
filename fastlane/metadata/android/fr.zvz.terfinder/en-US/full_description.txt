@@ -1,0 +1,10 @@
+PlanTER plans your rail journeys using regional trains ONLY: TGV and Intercités are always excluded from the search.
+
+• Regional itineraries across France, with connections, real-time schedules (SNCF GTFS-RT feed) and price estimates based on each region's fare rules.
+• Automatic discount-card pricing (regional and national cards) and intra-train ticket splitting to find the cheapest option.
+• "Arrive by" search, overnight journeys, regional bus/coach filter.
+• Directory of solidarity carpooling Signal groups, sorted by French region.
+
+The app is a free-software client for the PlanTER service: the interface ships offline, searches query the public ter.zvz.fr API. No personal data is collected; requests are encrypted on-device.
+
+PlanTER is free software (WTFPL licence), ad-free and tracker-free. Source code: https://github.com/muarf/PlanTER

@@ -1,0 +1,1 @@
+Regional-train-only journey planner: TER trains only, never TGV.

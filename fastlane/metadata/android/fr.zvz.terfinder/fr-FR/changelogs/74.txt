@@ -1,0 +1,5 @@
+Première version publique :
+• Recherche d'itinéraires 100 % TER (jamais de TGV)
+• Horaires temps réel SNCF et correspondances
+• Prix estimés par région, cartes de réduction, découpage intra-train
+• Annuaire covoiturage Signal par région

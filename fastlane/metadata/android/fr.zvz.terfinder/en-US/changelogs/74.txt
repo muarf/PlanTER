@@ -1,0 +1,5 @@
+First public release:
+• Regional-train-only journey planning (never TGV)
+• Real-time SNCF schedules and connections
+• Region-based price estimates, discount cards, ticket splitting
+• Signal carpooling directory by region

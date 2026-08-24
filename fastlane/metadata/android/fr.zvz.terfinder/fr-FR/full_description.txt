@@ -1,0 +1,10 @@
+PlanTER planifie vos voyages en train en ne vous proposant QUE des TER : les TGV et Intercités sont systématiquement écartés de la recherche.
+
+• Itinéraires régionaux partout en France, avec correspondances, horaires réels (flux GTFS-RT SNCF) et estimation de prix fondée sur les barèmes kilométriques des régions.
+• Prix réduits automatiques selon vos cartes (avantage région, cartes nationales…) et découpage intra-train pour trouver le billet le moins cher.
+• Recherche « arriver à » l'heure voulue, trajets de nuit, filtre bus/cars régionaux.
+• Annuaire de groupes Signal de covoiturage solidaire classés par région.
+
+L'application est un client libre du service PlanTER : l'interface est embarquée hors ligne, les recherches interrogent l'API publique ter.zvz.fr. Aucune donnée personnelle n'est collectée ; les requêtes sont chiffrées côté client.
+
+PlanTER est un logiciel libre (licence WTFPL), sans pub, sans traqueurs. Code source : https://github.com/muarf/PlanTER
