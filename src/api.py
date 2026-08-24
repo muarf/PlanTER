@@ -729,9 +729,13 @@ def journeys(
     dests = _expand_stops(dests_raw, 5000.0, allow_other_cities=expand_nearby)
 
     # T8 — le moteur consomme un instantané du poller (graphe et temps réel
-    # sont partagés en lecture seule via snapshot()).
+    # sont partagés en lecture seule via snapshot()). Instantané vide => pas
+    # de replanification RT (fast-path), mais `connection_risks` reste exposé
+    # (schéma stable pour les clients) via `rt_requested`.
     realtime = None
+    rt_requested = False
     if use_realtime and _poller is not None:
+        rt_requested = True
         rt_snap = _poller.snapshot()
         if rt_snap.cancelled or rt_snap.trip_delays:
             realtime = rt_snap
@@ -846,9 +850,10 @@ def journeys(
                     seg["to"]["stop_area_id"] = _bare(seg["to"]["stop_area_id"])
                     seg["from"]["time"] = _iso_min(d, seg.pop("departure_min"))
                     seg["to"]["time"] = _iso_min(d, seg.pop("arrival_min"))
-        # T8 — correspondances à risque (retard réel menaçant la jonction).
-        if realtime is not None:
-            jd["connection_risks"] = _connection_risks(jd)
+        # T8 — correspondances à risque (retard réel menaçant la jonction) ;
+        # clé présente (liste vide possible) dès que le RT est demandé
+        if rt_requested:
+            jd["connection_risks"] = _connection_risks(jd) if realtime is not None else []
         # T8 — perturbations du trajet (Service Alerts).
         if alerts_feed is not None:
             jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
