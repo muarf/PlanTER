@@ -143,6 +143,25 @@ class RaptorEngine:
         for tidx, trip in enumerate(graph.trips):
             for pos, st in enumerate(trip.stop_times):
                 self._trip_stop_pos[(tidx, st.stop)] = pos
+        # Motifs d'arrêts par route : les trips d'une route partagent quelques
+        # séquences d'arrêts ; mémoïser stop->position PAR MOTIF évite de
+        # relancer un lookup (trip, stop) pour chaque trip à chaque round.
+        # Le cache de _rounds n'y stocke que des POSITIONS : la bordabilité
+        # (dépendante des horaires propres à chaque trip) reste évaluée par trip.
+        self._trip_pattern: list[int] = [0] * len(graph.trips)
+        self._route_patterns: list[list[dict[int, int]]] = [[] for _ in graph.routes]
+        for ridx, trips in enumerate(graph.trips_by_route):
+            pids: dict[tuple, int] = {}
+            maps: list[dict[int, int]] = []
+            for tidx in trips:
+                sig = tuple(st.stop for st in graph.trips[tidx].stop_times)
+                pid = pids.get(sig)
+                if pid is None:
+                    pid = len(maps)
+                    pids[sig] = pid
+                    maps.append({st.stop: i for i, st in enumerate(graph.trips[tidx].stop_times)})
+                self._trip_pattern[tidx] = pid
+            self._route_patterns[ridx] = maps
 
     # ------------------------------------------------------------- vues
     def active_trips(self, date: int) -> list[int]:
@@ -262,31 +281,74 @@ class RaptorEngine:
             for s in marked:
                 routes.update(graph.routes_by_stop[s])
 
+            mt = graph.min_transfer
+            views_get = views.get
+            trip_pattern = self._trip_pattern
+            route_patterns = self._route_patterns
+            # ventilation des arrêts marqués par route en UN passage
+            # (au lieu de rescanner tout `marked` pour chaque route) ;
+            # `routes` reste un set pour conserver l'ordre d'itération d'origine
+            routes = set()
+            for s in marked:
+                routes.update(graph.routes_by_stop[s])
+            buckets: dict[int, list] = {}
+            bucket_setdefault = buckets.setdefault
+            for s, bt in marked.items():
+                for r in graph.routes_by_stop[s]:
+                    bucket_setdefault(r, []).append((s, bt))
             for route in routes:
-                on_route = self._route_stop_sets[route]
-                marked_on_route = [(s, bt) for s, bt in marked.items() if s in on_route]
+                marked_on_route = buckets.get(route)
                 if not marked_on_route:
                     continue
-                for trip_idx, view in views.get(route, ()):
+                pat_maps = route_patterns[route]
+                pos_cache: dict[int, list] = {}
+                bts = dict(marked_on_route)
+                for trip_idx, view in views_get(route, ()):
                     if view[0][2] > horizon:  # vues triées par 1er départ
                         break
-                    # positions des arrêts marqués dans cette vue
-                    for s, bt in marked_on_route:
-                        fpos = self._trip_stop_pos.get((trip_idx, s))
-                        if fpos is None:
+                    len_v = len(view)
+                    # positions des arrêts marqués pour ce motif (mémoïsées),
+                    # puis filtrage bordabilité avec les horaires du trip ;
+                    # l'ordre du dict `marked` est préservé
+                    pid = trip_pattern[trip_idx]
+                    raw = pos_cache.get(pid)
+                    if raw is None:
+                        fmap = pat_maps[pid].get
+                        raw = [(fpos, s) for s in bts
+                               if (fpos := fmap(s)) is not None]
+                        pos_cache[pid] = raw
+                    cands = []
+                    cands_append = cands.append
+                    if mirror:
+                        for fpos, s in raw:
+                            idx = len_v - 1 - fpos
+                            if idx < len_v and view[idx][2] >= bts[s]:
+                                cands_append((idx, s))
+                    else:
+                        for fpos, s in raw:
+                            if fpos < len_v and view[fpos][2] >= bts[s]:
+                                cands_append((fpos, s))
+                    # passage unique à frontière : deux embarquements sur le
+                    # même trip offrent des horaires identiques, donc un
+                    # candidat ne peut améliorer que les positions non déjà
+                    # couvertes par un candidat traité avant lui — l'ordre
+                    # d'insertion dans `parents`/`new_marked` est identique à
+                    # celui d'un rescannage complet par arrêt marqué.
+                    frontier = len_v
+                    for idx, s in cands:
+                        lo = idx + 1
+                        if lo >= frontier:
                             continue
-                        idx = len(view) - 1 - fpos if mirror else fpos
-                        if idx >= len(view) or view[idx][2] < bt:
-                            continue
-                        for j in range(idx + 1, len(view)):
+                        for j in range(lo, frontier):
                             a2 = view[j][0]
                             at = view[j][1]
                             if at < arr[a2]:
                                 arr[a2] = at
                                 parents[a2] = (trip_idx, s)
-                                # le temps d'embarquement doit suivre CHAQUE amélioration
+                                # le temps d'embarquement suit CHAQUE amélioration
                                 # (sinon une arrivée précédente plus tardive verrouille le round suivant)
-                                new_marked[a2] = at + graph.min_transfer[a2]
+                                new_marked[a2] = at + mt[a2]
+                        frontier = idx
 
             # arcs de marche inter-gares (ne consomment pas de round)
             for (a, b), minutes in graph.transfer_edges.items():
