@@ -36,7 +36,7 @@ from src.graph import (
     normalize,
 )
 from src.raptor import RaptorEngine, _iso as _iso_min, _vehicle_label
-from src import gtfs_rt, tictactrip, trainline, trainline_cards
+from src import gtfs_rt, trainline, trainline_cards
 from src.pricing import PricingEngine
 from src.pow import PoWEngine
 from src.crypto import CryptoEngine
@@ -51,7 +51,6 @@ _COORDS_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 _engine: RaptorEngine | None = None
 _poller: gtfs_rt.RealtimePoller | None = None
 _pricing: PricingEngine | None = None
-_tt: tictactrip.TictactripClient | None = None
 _pow = PoWEngine()
 _crypto = CryptoEngine()
 _raptor_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="raptor")
@@ -534,85 +533,6 @@ def cards_list() -> dict:
     return {"cards": cards}
 
 
-# T12bis — prix réels : envoi du trajet (gares + date) à un serveur tiers
-# (Tictactrip) qui peut journaliser la requête. Ce disclaimer est exposé à
-# l'utilisateur quand l'option « prix réels » est activée.
-REAL_PRICES_DISCLAIMER = (
-    "Votre recherche (gares de départ et d'arrivée, date) est envoyée au "
-    "service Tictactrip, un serveur tiers qui peut journaliser votre requête. "
-    "Les prix affichés sont les prix réellement vendus (promotions comprises), "
-    "ils ne sont pas calculés localement."
-)
-
-
-def _get_tictactrip() -> tictactrip.TictactripClient | None:
-    """Client Tictactrip partagé (créé une seule fois, échec silencieux)."""
-    global _tt
-    if _tt is None:
-        try:
-            _tt = tictactrip.TictactripClient()
-        except Exception:
-            _tt = None
-    return _tt
-
-
-def _real_prices_for(journey, d: _dt.date, tt) -> dict:
-    """Prix réels d'un trajet, leg par leg (legs ferroviaires uniquement).
-
-    Retourne `{"real_price_eur", "real_price_min_eur", "real_price_max_eur",
-    "legs": {leg_idx: {"line", "from", "to", "min_eur", "max_eur", "day_eur",
-    "day_company", "ok"}}}`. `day_eur` est le meilleur prix du jour UNIQUEMENT
-    si le trip du jour est un TER (priceCalendar peut sinon renvoyer un OUIGO/TGV
-    moins cher, hors périmètre) ; `day_company` indique alors la compagnie.
-    Si un leg n'a pas de prix Tictactrip (ville introuvable, 429…),
-    `ok` est False et les totaux agrègent uniquement les legs résolus ; si
-    AUCUN leg n'est résolu, tous les totaux sont None.
-    """
-    total_min = total_max = total_day = 0.0
-    n_ok = 0
-    any_min = any_max = any_day = True
-    legs_out: dict[int, dict] = {}
-    for li, leg in enumerate(journey.legs):
-        if leg.type == "walk":
-            continue
-        leg_date = _iso_min(d, leg.from_time)[:10]
-        try:
-            p = tt.leg_prices(leg.from_name, leg.to_name, leg_date)
-        except tictactrip.TictactripError:
-            p = None
-        if not p:
-            legs_out[li] = {"line": leg.line, "from": leg.from_name, "to": leg.to_name,
-                            "min_eur": None, "max_eur": None, "day_eur": None, "day_company": None, "ok": False}
-            continue
-        fmin = tt.fare_eur(p["min"])
-        fmax = tt.fare_eur(p["max"])
-        fday = tt.fare_eur(p["day"])
-        legs_out[li] = {"line": leg.line, "from": leg.from_name, "to": leg.to_name,
-                        "min_eur": fmin, "max_eur": fmax, "day_eur": fday,
-                        "day_company": p.get("day_company"), "ok": True}
-        if fday is not None:
-            total_day += fday
-        else:
-            any_day = False
-        if fmin is not None:
-            total_min += fmin
-        else:
-            any_min = False
-        if fmax is not None:
-            total_max += fmax
-        else:
-            any_max = False
-        n_ok += 1
-    if n_ok == 0:
-        return {"real_price_eur": None, "real_price_min_eur": None,
-                "real_price_max_eur": None, "legs": legs_out}
-    return {
-        "real_price_eur": round(total_day, 2) if any_day else None,
-        "real_price_min_eur": round(total_min, 2) if any_min else None,
-        "real_price_max_eur": round(total_max, 2) if any_max else None,
-        "legs": legs_out,
-    }
-
 
 @app.post("/v1/journeys", tags=["itinéraires"])
 def journeys(
@@ -673,9 +593,6 @@ def journeys(
     cards = params.get("cards", "")
     if not isinstance(cards, str):
         cards = ""
-    real_prices = params.get("real_prices", False)
-    if not isinstance(real_prices, bool):
-        real_prices = False
     expand_nearby = params.get("expand_nearby", False)
     if not isinstance(expand_nearby, bool):
         expand_nearby = False
@@ -857,25 +774,6 @@ def journeys(
         # T8 — perturbations du trajet (Service Alerts).
         if alerts_feed is not None:
             jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
-        # T12bis — prix réels (option) : prix réellement vendus leg par leg
-        # (Tictactrip, promos comprises). La requête est envoyée à un serveur
-        # tiers (disclaimer exposé ci-dessous). Échec = repli sur l'estimation
-        # locale sans faire planter la réponse.
-        if real_prices:
-            tt = _get_tictactrip()
-            if tt is not None:
-                try:
-                    rp = _real_prices_for(j, d, tt)
-                except Exception:
-                    rp = None
-                if rp:
-                    jd["real_price_eur"] = rp["real_price_eur"]
-                    jd["real_price_min_eur"] = rp["real_price_min_eur"]
-                    jd["real_price_max_eur"] = rp["real_price_max_eur"]
-                    for li, info in rp["legs"].items():
-                        jd["legs"][li]["real_price"] = {
-                            k: info[k] for k in ("line", "from", "to", "min_eur", "max_eur", "day_eur", "day_company", "ok")
-                        }
         # Notes de transparence : la résolution géographique (commune/GPS),
         # l'extension « gares voisines » et les groupes multi-gares peuvent
         # faire partir/arriver ailleurs que le lieu tapé. On l'affiche avec la
@@ -921,13 +819,6 @@ def journeys(
                         )
         out.append(jd)
     resp = {"journeys": out}
-    if real_prices:
-        resp["real_prices"] = {
-            "provider": "tictactrip",
-            "disclaimer": REAL_PRICES_DISCLAIMER,
-        }
-        for jd in out:
-            jd["real_prices_disclaimer"] = REAL_PRICES_DISCLAIMER
     return resp
 
 
