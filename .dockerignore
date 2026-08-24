@@ -1,0 +1,25 @@
+.git
+.github
+.venv
+venv
+node_modules
+**/__pycache__
+*.pyc
+
+# Données volumineuses : volume runtime, jamais dans l'image
+data
+reports
+
+# Hors périmètre serveur
+android
+fastlane
+assets
+tests
+docs
+*.md
+!README.md
+
+# Secrets locaux
+.env
+.env.*
+docker/*.local.*
