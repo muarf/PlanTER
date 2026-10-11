@@ -19,7 +19,7 @@ from src.pricing import PricingEngine
 from src.raptor import RaptorEngine
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
-DATE = 20260914
+DATE = 20261012
 
 # Ids Trainline (config/trainline_cards.json).
 BFC_26 = "5be729fcfc26caa921c53f6d836175d832c288ca"
