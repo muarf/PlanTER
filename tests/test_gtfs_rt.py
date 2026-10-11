@@ -38,7 +38,7 @@ class GtfsRtTestCase(unittest.TestCase):
         """Un trip réel du graphe (Dijon -> Besançon, C1) et ses arrêts."""
         idx = self.g.resolve_place("Dijon")[0]
         trip_idx = None
-        for tidx in self.g.active_trip_indices(20260914):
+        for tidx in self.g.active_trip_indices(20261012):
             t = self.g.trips[tidx]
             if t.stop_times and t.stop_times[0].stop == idx and len(t.stop_times) > 2:
                 trip_idx = tidx
@@ -58,7 +58,7 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260914"
+        e.trip_update.trip.start_date = "20261012"
         u1 = e.trip_update.stop_time_update.add()
         u1.stop_id = f"StopPoint:OCETrain TER-{uic1}"
         u1.arrival.delay = 600
@@ -67,7 +67,7 @@ class GtfsRtTestCase(unittest.TestCase):
         u2.departure.delay = 900
 
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        key = (trip.id, 20260914)
+        key = (trip.id, 20261012)
         self.assertIn(key, feed.trip_delays)
         delays = feed.trip_delays[key]
         self.assertEqual(delays[stops[0].stop], 10)
@@ -79,10 +79,10 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260914"
+        e.trip_update.trip.start_date = "20261012"
         e.trip_update.trip.schedule_relationship = _pb2.TripDescriptor.CANCELED
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
-        key = (trip.id, 20260914)
+        key = (trip.id, 20261012)
         self.assertIn(key, feed.cancelled)
         self.assertNotIn(key, feed.trip_delays)
 
@@ -103,7 +103,7 @@ class GtfsRtTestCase(unittest.TestCase):
         fm = _feed_message()
         e = fm.entity.add()
         e.id = "1"
-        e.trip_update.trip.trip_id = "OCEIC123:Intercites:FR::ZZZ::0:0:0:0:0:20260914"
+        e.trip_update.trip.trip_id = "OCEIC123:Intercites:FR::ZZZ::0:0:0:0:0:20261012"
         e.trip_update.stop_time_update.add().arrival.delay = 60
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
         self.assertEqual(feed.trip_delays, {})
@@ -115,21 +115,21 @@ class GtfsRtTestCase(unittest.TestCase):
         e = fm.entity.add()
         e.id = "1"
         e.trip_update.trip.trip_id = trip.id
-        e.trip_update.trip.start_date = "20260914"
+        e.trip_update.trip.start_date = "20261012"
         u = e.trip_update.stop_time_update.add()
         u.stop_id = "StopPoint:OCETrain TER-00000000"  # UIC inexistant
         u.arrival.delay = 600
         feed = gtfs_rt.parse_trip_updates(fm.SerializeToString(), self.g)
         # trip connu mais aucun retard mappable -> absent de trip_delays
-        self.assertNotIn((trip.id, 20260914), feed.trip_delays)
+        self.assertNotIn((trip.id, 20261012), feed.trip_delays)
 
     def test_snapshot_isole(self):
-        feed = gtfs_rt.RealtimeFeed(trip_delays={("t1", 20260914): {1: 5}}, cancelled={("t2", 20260914)})
+        feed = gtfs_rt.RealtimeFeed(trip_delays={("t1", 20261012): {1: 5}}, cancelled={("t2", 20261012)})
         snap = feed.snapshot()
-        snap.trip_delays[("t1", 20260914)][1] = 99
-        snap.cancelled.add(("t3", 20260914))
-        self.assertEqual(feed.trip_delays[("t1", 20260914)][1], 5)
-        self.assertNotIn(("t3", 20260914), feed.cancelled)
+        snap.trip_delays[("t1", 20261012)][1] = 99
+        snap.cancelled.add(("t3", 20261012))
+        self.assertEqual(feed.trip_delays[("t1", 20261012)][1], 5)
+        self.assertNotIn(("t3", 20261012), feed.cancelled)
 
     def test_age_fraicheur(self):
         import time
@@ -138,6 +138,32 @@ class GtfsRtTestCase(unittest.TestCase):
         self.assertTrue(feed.is_fresh)
         feed.fetched_at = time.time() - 10 * 60
         self.assertFalse(feed.is_fresh)
+
+    def test_service_date_happy_path(self):
+        """Cas nominal de parsing d'une date de service YYYYMMDD valide."""
+        fm = _feed_message()
+        e = fm.entity.add()
+        e.trip_update.trip.start_date = "20261012"
+        # Le timestamp de fallback n'a pas d'importance ici
+        result = gtfs_rt._service_date(e.trip_update, 1672531200)
+        self.assertEqual(result, 20261012)
+
+    def test_service_date_value_error(self):
+        """Test du fallback lors d'une start_date invalide (ex: format ISO, ou vide)."""
+        import datetime as dt
+
+        fm = _feed_message()
+        e = fm.entity.add()
+        # Une valeur qui va provoquer une ValueError lors du int()
+        e.trip_update.trip.start_date = "2026-09-14"
+
+        # Timestamp pour le 2026-10-12 12:00:00 UTC (14:00 Europe/Paris)
+        ts = int(dt.datetime(2026, 10, 12, 12, 0, tzinfo=dt.timezone.utc).timestamp())
+
+        # _service_date doit attraper l'exception et se rabattre sur la date du header (ts)
+        result = gtfs_rt._service_date(e.trip_update, ts)
+
+        self.assertEqual(result, 20261012)
 
 
 class ServiceAlertsTestCase(unittest.TestCase):
@@ -152,7 +178,7 @@ class ServiceAlertsTestCase(unittest.TestCase):
     @staticmethod
     def _real_trip(g):
         """Un trip réel du graphe (numéro de train exploitable)."""
-        for tidx in g.active_trip_indices(20260914):
+        for tidx in g.active_trip_indices(20261012):
             t = g.trips[tidx]
             if t.stop_times and len(t.stop_times) > 2:
                 return t
