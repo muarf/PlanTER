@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import math
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from pathlib import Path
