@@ -42,6 +42,11 @@ def _cards_json(path: Path = DEFAULT_JSON) -> list[dict]:
 
 
 @lru_cache(maxsize=1)
+def _cards_dict() -> dict[str, dict]:
+    return {c["id"]: c for c in _cards_json()}
+
+
+@lru_cache(maxsize=1)
 def cards() -> list[dict]:
     """Toutes les cartes TER (id, name, shortName, ageRange optionnel)."""
     return _cards_json()
@@ -49,15 +54,12 @@ def cards() -> list[dict]:
 
 def card_by_id(card_id: str) -> dict | None:
     """Carte TER par son hash Trainline, ou None si inconnue."""
-    for c in _cards_json():
-        if c["id"] == card_id:
-            return c
-    return None
+    return _cards_dict().get(card_id)
 
 
 def valid_ids(card_ids: list[str]) -> list[str]:
     """Filtre les ids : ne garde que les cartes TER connues, sans doublons."""
-    known = {c["id"] for c in _cards_json()}
+    known = _cards_dict()
     seen: set[str] = set()
     out: list[str] = []
     for cid in card_ids:
