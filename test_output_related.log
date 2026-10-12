@@ -1,0 +1,329 @@
+/home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+.......FFFFFF..E..FFFFFFFFFFFFFFFFFFFFFF.EEEFF.......FF....F
+======================================================================
+ERROR: test_connection_risks_detecte_retard_rongeant_la_marge (tests.test_api.ApiTestCase.test_connection_risks_detecte_retard_rongeant_la_marge)
+T8 — une correspondance dont le retard a consommé la marge planifiée
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 511, in test_connection_risks_detecte_retard_rongeant_la_marge
+    j_theo = engine.depart_after(
+             ^^^^^^^^^^^^^^^^^^^^
+IndexError: list index out of range
+
+======================================================================
+ERROR: test_recherche_large_trajets_de_fin_de_journee (tests.test_api.ApiTestCase.test_recherche_large_trajets_de_fin_de_journee)
+RAPTOR simple ne garde que l'arrivée la plus tôt par nombre de
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 478, in test_recherche_large_trajets_de_fin_de_journee
+    js = self.client.post("/v1/journeys", json=_enc(q)).json()["journeys"]
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+KeyError: 'journeys'
+
+======================================================================
+ERROR: test_sort_duration_le_plus_court_en_premier (tests.test_api.ApiTestCase.test_sort_duration_le_plus_court_en_premier)
+sort=duration : la durée ne décroît pas, et la liste n'est pas triée
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 458, in test_sort_duration_le_plus_court_en_premier
+    by_dep = self.client.post("/v1/journeys", json=_enc({**q, "sort": "departure"})).json()["journeys"]
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+KeyError: 'journeys'
+
+======================================================================
+ERROR: test_sort_duration_reste_ordonne_par_egalite (tests.test_api.ApiTestCase.test_sort_duration_reste_ordonne_par_egalite)
+sort=duration : à durée égale, les départs restent triés.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 468, in test_sort_duration_reste_ordonne_par_egalite
+    js = self.client.post("/v1/journeys", json=_enc(q)).json()["journeys"]
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+KeyError: 'journeys'
+
+======================================================================
+FAIL: test_aucune_gare_dans_intervalle (tests.test_geo_radius.RadiusApiTest.test_aucune_gare_dans_intervalle)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 149, in test_aucune_gare_dans_intervalle
+    self.assertEqual(r.status_code, 404)
+AssertionError: 400 != 404
+
+======================================================================
+FAIL: test_defaut_plus_proche_seule (tests.test_geo_radius.RadiusApiTest.test_defaut_plus_proche_seule)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 129, in test_defaut_plus_proche_seule
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_intervalle_min_max (tests.test_geo_radius.RadiusApiTest.test_intervalle_min_max)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 141, in test_intervalle_min_max
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_min_max_inverses_acceptes (tests.test_geo_radius.RadiusApiTest.test_min_max_inverses_acceptes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 145, in test_min_max_inverses_acceptes
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_note_origine_commune (tests.test_geo_radius.RadiusApiTest.test_note_origine_commune)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 161, in test_note_origine_commune
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_note_origine_gps (tests.test_geo_radius.RadiusApiTest.test_note_origine_gps)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_geo_radius.py", line 170, in test_note_origine_gps
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_gare_introuvable_404 (tests.test_api.ApiTestCase.test_gare_introuvable_404)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 557, in test_gare_introuvable_404
+    self.assertEqual(r.status_code, 404)
+AssertionError: 400 != 404
+
+======================================================================
+FAIL: test_health (tests.test_api.ApiTestCase.test_health)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 43, in test_health
+    self.assertEqual(body["data_date"], "2028-06-30")
+AssertionError: '2027-03-31' != '2028-06-30'
+- 2027-03-31
++ 2028-06-30
+
+
+======================================================================
+FAIL: test_heure_invalide_400 (tests.test_api.ApiTestCase.test_heure_invalide_400)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 585, in test_heure_invalide_400
+    self.assertEqual(r.json()["error"]["code"], "INVALID_TIME")
+AssertionError: 'INVALID_DATE' != 'INVALID_TIME'
+- INVALID_DATE
+?         --
++ INVALID_TIME
+?          ++
+
+
+======================================================================
+FAIL: test_journeys_arrivee_jour_suivant (tests.test_api.ApiTestCase.test_journeys_arrivee_jour_suivant)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/jules/.pyenv/versions/3.12.13/lib/python3.12/unittest/mock.py", line 1396, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/tests/test_api.py", line 351, in test_journeys_arrivee_jour_suivant
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_aucun_resultat (tests.test_api.ApiTestCase.test_journeys_aucun_resultat)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 249, in test_journeys_aucun_resultat
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_by_nom_et_arrival (tests.test_api.ApiTestCase.test_journeys_by_nom_et_arrival)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 160, in test_journeys_by_nom_et_arrival
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_canonique (tests.test_api.ApiTestCase.test_journeys_canonique)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 139, in test_journeys_canonique
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_coordonnees (tests.test_api.ApiTestCase.test_journeys_coordonnees)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 284, in test_journeys_coordonnees
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_count_et_max_transfers (tests.test_api.ApiTestCase.test_journeys_count_et_max_transfers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 426, in test_journeys_count_et_max_transfers
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_departs_intermediaires_reveles (tests.test_api.ApiTestCase.test_journeys_departs_intermediaires_reveles)
+T3bis — la révélation des départs intermédiaires traverse le filtre
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 368, in test_journeys_departs_intermediaires_reveles
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_depuis_commune_id (tests.test_api.ApiTestCase.test_journeys_depuis_commune_id)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 129, in test_journeys_depuis_commune_id
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_depuis_commune_tapee (tests.test_api.ApiTestCase.test_journeys_depuis_commune_tapee)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 119, in test_journeys_depuis_commune_tapee
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_dijon_et_dijon_toutes_gares (tests.test_api.ApiTestCase.test_journeys_dijon_et_dijon_toutes_gares)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 196, in test_journeys_dijon_et_dijon_toutes_gares
+    self.assertEqual(r1.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_groupe_paris (tests.test_api.ApiTestCase.test_journeys_groupe_paris)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 170, in test_journeys_groupe_paris
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_marche_inter_gares (tests.test_api.ApiTestCase.test_journeys_marche_inter_gares)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 272, in test_journeys_marche_inter_gares
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_plus_de_3_correspondances (tests.test_api.ApiTestCase.test_journeys_plus_de_3_correspondances)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 260, in test_journeys_plus_de_3_correspondances
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_prix_estime (tests.test_api.ApiTestCase.test_journeys_prix_estime)
+T12 — chaque trajet expose un prix estimé et ses métadonnées de
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 382, in test_journeys_prix_estime
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_prix_reduit_avec_carte (tests.test_api.ApiTestCase.test_journeys_prix_reduit_avec_carte)
+T12 — cards=… : price_reduced_eur baisse avec une carte de la région
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 403, in test_journeys_prix_reduit_avec_carte
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_prix_reduit_egal_normal_sans_carte (tests.test_api.ApiTestCase.test_journeys_prix_reduit_egal_normal_sans_carte)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 416, in test_journeys_prix_reduit_egal_normal_sans_carte
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_sans_poller_delay_min_zero (tests.test_api.ApiTestCase.test_journeys_sans_poller_delay_min_zero)
+T8 — sans poller temps réel actif, delay_min vaut 0 (use_realtime est
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 449, in test_journeys_sans_poller_delay_min_zero
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_use_realtime_delay_min_present (tests.test_api.ApiTestCase.test_journeys_use_realtime_delay_min_present)
+T8 — use_realtime=true : chaque leg expose delay_min (0 par défaut).
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 436, in test_journeys_use_realtime_delay_min_present
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_journeys_ville_multi_gares_lyon (tests.test_api.ApiTestCase.test_journeys_ville_multi_gares_lyon)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 183, in test_journeys_ville_multi_gares_lyon
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_sort_transfers_correspondances_avant_depart (tests.test_api.ApiTestCase.test_sort_transfers_correspondances_avant_depart)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 237, in test_sort_transfers_correspondances_avant_depart
+    self.assertEqual(r_dep.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_sort_transfers_par_defaut (tests.test_api.ApiTestCase.test_sort_transfers_par_defaut)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 222, in test_sort_transfers_par_defaut
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_stations_search_post (tests.test_api.ApiTestCase.test_stations_search_post)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 79, in test_stations_search_post
+    self.assertTrue(body["bus_stops"])
+AssertionError: [] is not true
+
+======================================================================
+FAIL: test_vehicle_defaut_train_only (tests.test_api.ApiTestCase.test_vehicle_defaut_train_only)
+Sans vehicle=, l'API exclut les cars TER (train_only par défaut) ;
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 607, in test_vehicle_defaut_train_only
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+======================================================================
+FAIL: test_trip_schedule_train_and_bus (tests.test_api.WebTestCase.test_trip_schedule_train_and_bus)
+Vérifie que /v1/trips/{trip_id}/schedule renvoie les circulations du jour et la liste des arrêts.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/app/tests/test_api.py", line 663, in test_trip_schedule_train_and_bus
+    self.assertEqual(r.status_code, 200)
+AssertionError: 400 != 200
+
+----------------------------------------------------------------------
+Ran 60 tests in 4.432s
+
+FAILED (failures=33, errors=4)

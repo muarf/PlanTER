@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+import heapq
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from functools import lru_cache
 from pathlib import Path
@@ -169,13 +170,18 @@ def _nearest_stops(
     for i, s in enumerate(g.stops):
         if s.id.startswith("BusStop:"):
             continue
-        scored.append((approx_distance_km(lat, lon, s.lat, s.lon), i))
-    scored.sort(key=lambda it: it[0])
-    if max_km > 0:
-        scored = [(d, i) for d, i in scored if min_km <= d <= max_km]
-    else:
+        d = approx_distance_km(lat, lon, s.lat, s.lon)
+        if max_km > 0 and not (min_km <= d <= max_km):
+            continue
+        scored.append((d, i))
+
+    if max_km == 0:
         n = 1
-    return [i for _, i in scored[:n]]
+
+    if len(scored) == 0:
+        return []
+
+    return [i for _, i in heapq.nsmallest(n, scored)]
 
 
 GPS_FAIRNESS_KM = 5.0
@@ -194,13 +200,21 @@ def _nearest_stops_window(g: Graph, lat: float, lon: float) -> list[int]:
     """Gare la plus proche + gares dans la fenêtre d'équité (cf.
     GPS_FAIRNESS_KM), plafonné à MAX_GARES_PER_SIDE."""
     scored = []
+    min_d = float("inf")
     for i, s in enumerate(g.stops):
         if s.id.startswith("BusStop:"):
             continue
-        scored.append((approx_distance_km(lat, lon, s.lat, s.lon), i))
-    scored.sort(key=lambda it: it[0])
-    window = scored[0][0] + GPS_FAIRNESS_KM
-    return [i for d, i in scored if d <= window][:MAX_GARES_PER_SIDE]
+        d = approx_distance_km(lat, lon, s.lat, s.lon)
+        if d < min_d:
+            min_d = d
+        scored.append((d, i))
+
+    if not scored:
+        return []
+
+    window = min_d + GPS_FAIRNESS_KM
+    filtered = [(d, i) for d, i in scored if d <= window]
+    return [i for _, i in heapq.nsmallest(MAX_GARES_PER_SIDE, filtered)]
 
 
 def _fmt_km(km: float) -> str:
