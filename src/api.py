@@ -18,6 +18,7 @@ import datetime as _dt
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request, Body
@@ -56,6 +57,7 @@ _raptor_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="raptor")
 RAPTOR_TIMEOUT_S = 35
 
 
+@lru_cache(maxsize=1)
 def _load_place_groups() -> dict:
     """Config des groupes « toutes gares » (§5.5) ; [] si fichier absent."""
     path = Path(__file__).resolve().parents[1] / "config" / "place_groups.json"
