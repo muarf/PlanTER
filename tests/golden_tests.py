@@ -25,7 +25,7 @@ from src.raptor import RaptorEngine
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
 
-LUNDI = 20260914
+LUNDI = 20261012
 VENDREDI = 20260918
 
 

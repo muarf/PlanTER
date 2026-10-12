@@ -14,7 +14,7 @@ from src.raptor import RaptorEngine
 from src import gtfs_rt
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
-DATE = 20260914  # un lundi
+DATE = 20261012  # un lundi
 
 
 def _m(hh, mm):
