@@ -16,6 +16,9 @@ node_modules/
 .env.*
 !.env.example
 
+# Cache local de l'outil Jules (contient des données de sessions, dont d'autres dépôts)
+.jules/
+
 # Android (Capacitor) — build outputs
 android/app/build/
 android/.gradle/

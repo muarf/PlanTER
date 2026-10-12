@@ -5,7 +5,7 @@ import math
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.rfn import _haversine, EARTH_R_KM
+from src.rfn import _haversine, EARTH_R_KM, uic_from_stop_id
 
 class TestRfn(unittest.TestCase):
     def test_haversine_identity(self):
@@ -27,5 +27,22 @@ class TestRfn(unittest.TestCase):
         expected_dist = (math.pi / 180.0) * EARTH_R_KM
         self.assertAlmostEqual(dist, expected_dist, places=5)
 
+
+class TestUicFromStopId(unittest.TestCase):
+    def test_happy_paths(self):
+        self.assertEqual(uic_from_stop_id("StopArea:OCE87734004"), "87734004")
+        self.assertEqual(uic_from_stop_id("StopPoint:OCETrainTER-87734004"), "87734004")
+        self.assertEqual(uic_from_stop_id("StopPoint:OCETrainTER-87734004:some_suffix"), "87734004")
+        self.assertEqual(uic_from_stop_id("OCE87734004"), "87734004")
+
+    def test_edge_cases(self):
+        self.assertIsNone(uic_from_stop_id("StopArea:SNCF87734004"))
+        self.assertIsNone(uic_from_stop_id(""))
+        self.assertIsNone(uic_from_stop_id("87734004"))
+        self.assertIsNone(uic_from_stop_id("stoparea:oce87734004"))
+        self.assertIsNone(uic_from_stop_id("oce87734004"))
+
+
 if __name__ == "__main__":
     unittest.main()
+
