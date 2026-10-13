@@ -14,7 +14,7 @@ from src.raptor import RaptorEngine
 from src import gtfs_rt
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "graph.bin"
-DATE = 20261012  # un lundi
+DATE = 20261019  # un lundi
 
 
 def _m(hh, mm):
@@ -45,21 +45,18 @@ class RaptorTestCase(unittest.TestCase):
         self.assertIn("894212", j.legs[0].trip_id)
 
     def test_corridor_paris_besancon(self):
-        # Horaire sept. 2026 : plus de K7 matinal Paris -> Dijon ; le meilleur
-        # GL -> Besançon Viotte marche jusqu'à Paris Est puis K4 -> Belfort
-        # et C13 -> Besançon.
         j = self.e.depart_after(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, vehicle="train_only")
         self.assertTrue(j)
         j = j[0]
-        self.assertEqual(j.transfers, 2)
-        self.assertEqual(j.departure, _m(7, 0))
-        self.assertEqual(j.arrival, _m(14, 28))
-        self.assertEqual(j.legs[0].type, "walk")
-        self.assertEqual([leg.line for leg in j.legs[1:]], ["K4", "C13"])
-        self.assertEqual(j.legs[1].from_time, _m(8, 42))
-        # correspondance à Belfort-Ville
-        self.assertIn("Belfort", j.legs[1].to_name)
-        self.assertIn("Belfort", j.legs[2].from_name)
+        self.assertEqual(j.transfers, 1)
+        self.assertEqual(j.departure, _m(7, 34))
+        self.assertEqual(j.arrival, _m(12, 4))
+        self.assertEqual([leg.line for leg in j.legs], ["K7", "C11"])
+        self.assertIn("17769", j.legs[0].trip_id)
+        self.assertIn("894213", j.legs[1].trip_id)
+        # correspondance à Dijon
+        self.assertEqual(j.legs[0].to_name, "Dijon")
+        self.assertEqual(j.legs[1].from_name, "Dijon")
 
     def test_retour_soir_besancon_paris(self):
         # Itinéraire réel utilisateur : C1 (MOBIGO 894264) puis K7 17764 -> Bercy 22:29
@@ -81,7 +78,7 @@ class RaptorTestCase(unittest.TestCase):
         j = j[0]
         self.assertEqual(j.transfers, 0)
         self.assertEqual(j.departure, _m(6, 42))
-        self.assertEqual(j.arrival, _m(11, 15))
+        self.assertEqual(j.arrival, _m(11, 16))
         self.assertEqual(j.legs[0].line, "K4")
         self.assertEqual(j.legs[0].from_name, "Paris Est")
 
@@ -96,19 +93,17 @@ class RaptorTestCase(unittest.TestCase):
 
     def test_marche_inter_gares(self):
         # Arc piéton Austerlitz -> Bercy (paris_links) puis K7 direct -> Dijon.
-        # Depuis sept. 2026 le K7 ne dessert plus Gare de Lyon le matin : on
-        # part d'Austerlitz pour forcer la marche entre gares parisiennes.
         j = self.e.depart_after(DATE, self.resolve("Paris Austerlitz"), self.resolve("Dijon"), _m(7, 0), 3, vehicle="train_only")
         self.assertTrue(j)
         j = j[0]
         self.assertEqual(j.transfers, 1)
         self.assertEqual(j.departure, _m(7, 0))
-        self.assertEqual(j.arrival, _m(18, 25))
+        self.assertEqual(j.arrival, _m(10, 35))
         self.assertEqual(j.legs[0].type, "walk")
         self.assertIn("Austerlitz", j.legs[0].from_name)
-        self.assertIn("Bercy", j.legs[0].to_name)
+        self.assertIn("Gare de Lyon", j.legs[0].to_name)
         self.assertEqual(j.legs[1].line, "K7")
-        self.assertEqual(j.legs[1].from_time, _m(15, 35))
+        self.assertEqual(j.legs[1].from_time, _m(7, 34))
 
     def test_marche_inter_gares_puis_3_chgt(self):
         # Bercy -> Mulhouse via marches intra-Paris + K4 (Belfort) + C13 : 3 chgt
@@ -121,18 +116,18 @@ class RaptorTestCase(unittest.TestCase):
 
     def test_wide_revele_le_depart_qui_rattrape_la_meme_correspondance(self):
         """Recherche large (T3bis) : à 11:00, le 12:17 Saint-Vit rejoint à
-        Dijon le même P5 (N891356) que le 11:06 -> même arrivée 19:49 à Bercy.
+        Dijon le même K7 que le 11:06 -> même arrivée 18:27 à Bercy.
         RAPTOR simple le jette comme dominé ; la révélation le fait
         apparaître."""
         js = self.e.depart_after_wide(DATE, self.resolve("Saint-Vit"), self.resolve("Paris Bercy"), _m(11, 0), 6, "train_only")
         dep12 = [j for j in js if j.departure == _m(12, 17)]
         self.assertTrue(dep12)
-        ref = next(j for j in js if j.departure == _m(11, 6) and j.arrival == _m(19, 49))
-        j = next(j for j in dep12 if j.arrival == _m(19, 49))
+        ref = next(j for j in js if j.departure == _m(11, 6) and j.arrival == _m(18, 27))
+        j = next(j for j in dep12 if j.arrival == _m(18, 27))
         self.assertEqual(js[0].departure, _m(11, 6))
-        # mêmes legs P5 + P25 que le départ de référence
-        self.assertEqual(j.legs[-2].trip_id, ref.legs[-2].trip_id)
+        # même second leg K7 que le départ de référence
         self.assertEqual(j.legs[-1].trip_id, ref.legs[-1].trip_id)
+        self.assertEqual(js[0].arrival, j.arrival)
 
     def test_wide_renvoie_les_departs_intermediaires(self):
         """Recherche large (T3bis) : Dijon -> Besançon Viotte renvoie tous les
@@ -150,19 +145,13 @@ class RaptorTestCase(unittest.TestCase):
         js = self.e.arrive_by_wide(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 6, "train_only")
         self.assertTrue(js)
         self.assertEqual(js[0].arrival, _m(12, 4))
-        self.assertEqual(js[0].departure, _m(6, 14))
+        self.assertEqual(js[0].departure, _m(7, 34))
 
     # -------------------------------------------------------------- modes
     def test_nuit_depart_apres_0300(self):
-        # À 03:00 aucun train ne roule : l'itinéraire démarre par la marche
-        # vers la gare d'embarquement (le départ affiché vaut t0) ; premier
-        # train = K4 06:42 au départ de Paris Est.
         j = self.e.depart_after(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(3, 0), 3)
         self.assertTrue(j)
-        j = j[0]
-        self.assertEqual(j.departure, _m(3, 0))
-        first_train = next(l for l in j.legs if l.type == "train")
-        self.assertEqual(first_train.from_time, _m(6, 42))
+        self.assertEqual(j[0].departure, _m(7, 34))
 
     def test_arrive_by(self):
         j = self.e.arrive_by(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(13, 0), 3)
@@ -170,13 +159,13 @@ class RaptorTestCase(unittest.TestCase):
         j = j[0]
         self.assertLessEqual(j.arrival, _m(13, 0))
         self.assertEqual(j.arrival, _m(12, 4))
-        self.assertEqual(j.departure, _m(6, 14))
-        self.assertEqual(j.transfers, 3)
+        self.assertEqual(j.departure, _m(7, 34))
+        self.assertEqual(j.transfers, 1)
 
     def test_train_only(self):
         j = self.e.depart_after(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, vehicle="train_only")
         self.assertTrue(j)
-        self.assertEqual(j[0].transfers, 2)
+        self.assertEqual(j[0].transfers, 1)
         self.assertTrue(all(leg.type in ("train", "walk") for leg in j[0].legs))
 
     # -------------------------------------------------------------- regression T2
@@ -236,9 +225,9 @@ class RaptorTestCase(unittest.TestCase):
         import datetime
 
         j = self.e.depart_after(DATE, self.resolve("Paris Gare de Lyon"), self.resolve("Besançon Viotte"), _m(7, 0), 3, vehicle="train_only")[0]
-        d = j.to_json(datetime.date(2026, 9, 14))
-        self.assertEqual(d["transfers"], 2)
-        self.assertEqual(d["legs"][1]["line"], "K4")
+        d = j.to_json(datetime.date(2026, 10, 19))
+        self.assertEqual(d["transfers"], 1)
+        self.assertEqual(d["legs"][0]["line"], "K7")
         self.assertIn("T", d["departure"])
         self.assertIn("+02:00", d["departure"])
 

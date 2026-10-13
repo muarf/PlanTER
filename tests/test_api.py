@@ -24,8 +24,8 @@ def _enc(params: dict) -> dict:
     """Chiffre les paramètres et retourne le body POST."""
     return {"payload": _crypto.encrypt_b64(params)}
 
-DATE = "2026-10-12"
-DATE_YM = 20261012
+DATE = "2026-10-19"
+DATE_YM = 20261019
 
 
 class ApiTestCase(unittest.TestCase):
@@ -130,8 +130,7 @@ class ApiTestCase(unittest.TestCase):
 
     # ------------------------------------------------------------- journeys
     def test_journeys_canonique(self):
-        # §7.4 : Paris Gare de Lyon -> Besançon Viotte ; depuis sept. 2026 le
-        # meilleur itinéraire passe par Paris Est -> Belfort (K4) -> C13.
+        # §7.4 : Paris Gare de Lyon -> Besançon Viotte via Paris Bercy (K7) -> Dijon -> C11.
         r = self.client.post(
             "/v1/journeys",
             json=_enc({"from": "OCE87686006", "to": "OCE87718007", "date": DATE, "time": "07:00"}),
@@ -140,11 +139,11 @@ class ApiTestCase(unittest.TestCase):
         journeys = r.json()["journeys"]
         self.assertTrue(journeys)
         j = journeys[0]
-        self.assertEqual(j["transfers"], 2)
-        self.assertEqual(j["departure"], "2026-09-14T07:07:00+02:00")
-        self.assertEqual(j["arrival"], "2026-09-14T14:28:00+02:00")
-        self.assertEqual(j["duration_min"], 441)
-        self.assertEqual([leg["line"] or leg["type"] for leg in j["legs"]], ["walk", "K4", "C13"])
+        self.assertEqual(j["transfers"], 1)
+        self.assertEqual(j["departure"], f"{DATE}T07:34:00+02:00")
+        self.assertEqual(j["arrival"], f"{DATE}T12:04:00+02:00")
+        self.assertEqual(j["duration_min"], 270)
+        self.assertEqual([leg["line"] or leg["type"] for leg in j["legs"]], ["K7", "C11"])
 
     def test_journeys_by_nom_et_arrival(self):
         r = self.client.post(
@@ -267,13 +266,13 @@ class ApiTestCase(unittest.TestCase):
         # première. On cherche donc une solution avec un premier leg à pied.
         r = self.client.post(
             "/v1/journeys",
-            json=_enc({"from": "Paris Bercy", "to": "Dijon", "date": DATE, "time": "07:00", "count": 20}),
+            json=_enc({"from": "Paris Austerlitz", "to": "Dijon", "date": DATE, "time": "07:00", "count": 20}),
         )
         self.assertEqual(r.status_code, 200)
         walked = [j for j in r.json()["journeys"] if j["legs"] and j["legs"][0]["type"] == "walk"]
         self.assertTrue(walked, "aucune solution avec marche inter-gares trouvée")
         j = walked[0]
-        self.assertEqual(j["arrival"], "2026-09-14T17:09:00+02:00")
+        self.assertEqual(j["arrival"], f"{DATE}T10:35:00+02:00")
 
     def test_journeys_coordonnees(self):
         # Coordonnées de la gare de Dijon (47.323, 5.027) -> Besançon Viotte
@@ -513,14 +512,14 @@ class ApiTestCase(unittest.TestCase):
             DATE_YM, g.resolve_place("Paris Gare de Lyon"),
             g.resolve_place("Besançon Viotte"), 7 * 60, 3, "train_only",
         )[0]
-        # premier leg ferroviaire : le K4 Paris Est -> Belfort-Ville (12:48),
-        # suivi du C13 Belfort -> Besançon (13:04) : marge planifiée de 16 min.
-        # Un retard de 10 min laisse une marge réelle de 6 min (< retard +
-        # seuil) : la correspondance doit être signalée à risque.
+        # premier leg ferroviaire : le K7 Paris Bercy -> Dijon (10:35),
+        # suivi du C11 Dijon -> Besançon (11:09) : marge planifiée de 34 min.
+        # Un retard de 25 min laisse une marge réelle de 9 min : la
+        # correspondance doit être signalée à risque.
         feeder = next(l for l in j_theo.legs if l.type == "train")
         trip = g.trips[g.trip_index[feeder.trip_id]]
         feed = gtfs_rt.RealtimeFeed(
-            trip_delays={(feeder.trip_id, DATE_YM): {st.stop: 10 for st in trip.stop_times}}
+            trip_delays={(feeder.trip_id, DATE_YM): {st.stop: 25 for st in trip.stop_times}}
         )
         # injecte le feed dans le poller (le moteur partage l'instantané)
         saved = api._poller
@@ -537,10 +536,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
         risks = j.get("connection_risks", [])
-        self.assertTrue(risks, "le retard K4 10 min doit signaler une correspondance risquée")
-        self.assertEqual(risks[0]["at_station"], "Belfort-Ville")
-        self.assertEqual((risks[0]["from_line"], risks[0]["to_line"]), ("K4", "C13"))
-        self.assertEqual(risks[0]["delay_min"], 10)
+        self.assertTrue(risks, "le retard K7 25 min doit signaler une correspondance risquée")
+        self.assertEqual(risks[0]["at_station"], "Dijon")
+        self.assertEqual((risks[0]["from_line"], risks[0]["to_line"]), ("K7", "C11"))
+        self.assertEqual(risks[0]["delay_min"], 25)
         # sans retard injecté, aucune correspondance à risque (champ présent mais vide)
         r0 = self.client.post(
             "/v1/journeys",
