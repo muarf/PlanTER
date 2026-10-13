@@ -223,7 +223,7 @@ class PricingEngine:
                 r = self.stop_region(st.stop)
                 counts[r] = counts.get(r, 0) + 1
             # majorité (à égalité : le premier par ordre d'apparition)
-            self._trip_region[trip_idx] = max(counts.items(), key=lambda kv: kv[1])[0]
+            self._trip_region[trip_idx] = max(counts, key=counts.get) if counts else "INCONNUE"
         return self._trip_region[trip_idx]
 
     # ------------------------------------------------------ distance d'un leg

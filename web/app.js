@@ -1033,10 +1033,16 @@ function renderScheduleModal(data, selectedTripId) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `modal-tab-btn ${isSelected ? "active" : ""}`;
-    btn.innerHTML = `
-      <span>${t.departure_time}</span>
-      ${isCurrent ? '<span class="current-star" title="Votre trajet actuel">★</span>' : ""}
-    `;
+    const timeSpan = document.createElement("span");
+    timeSpan.textContent = t.departure_time;
+    btn.appendChild(timeSpan);
+    if (isCurrent) {
+      const starSpan = document.createElement("span");
+      starSpan.className = "current-star";
+      starSpan.title = "Votre trajet actuel";
+      starSpan.textContent = "★";
+      btn.appendChild(starSpan);
+    }
     btn.addEventListener("click", () => {
       modalTabs.querySelectorAll(".modal-tab-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
