@@ -24,8 +24,8 @@ def _enc(params: dict) -> dict:
     """Chiffre les paramètres et retourne le body POST."""
     return {"payload": _crypto.encrypt_b64(params)}
 
-DATE = "2026-09-14"
-DATE_YM = 20260914
+DATE = "2026-10-12"
+DATE_YM = 20261012
 
 
 class ApiTestCase(unittest.TestCase):
@@ -160,7 +160,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         journeys = r.json()["journeys"]
         if journeys:
-            self.assertIn("2026-09-14", journeys[0]["arrival"])
+            self.assertIn(DATE, journeys[0]["arrival"])
 
     def test_journeys_groupe_paris(self):
         r = self.client.post(
@@ -283,7 +283,7 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
-        self.assertEqual(j["departure"], "2026-09-14T12:11:00+02:00")
+        self.assertEqual(j["departure"], f"{DATE}T12:11:00+02:00")
         self.assertEqual(j["legs"][0]["from"]["name"], "Dijon")
 
     @patch("src.raptor.RaptorEngine.depart_after_wide")
@@ -351,7 +351,8 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         j = r.json()["journeys"][0]
         self.assertEqual(j["transfers"], 2)
-        self.assertEqual(j["arrival"], "2026-09-15T00:31:00+02:00")
+        tomorrow = (dt.date.fromisoformat(DATE) + dt.timedelta(days=1)).isoformat()
+        self.assertEqual(j["arrival"], f"{tomorrow}T00:31:00+02:00")
 
     def test_journeys_departs_intermediaires_reveles(self):
         """T3bis — la révélation des départs intermédiaires traverse le filtre

@@ -62,7 +62,11 @@ def _load_place_groups() -> dict:
     """Config des groupes « toutes gares » (§5.5) ; [] si fichier absent."""
     path = Path(__file__).resolve().parents[1] / "config" / "place_groups.json"
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        groups = json.loads(path.read_text(encoding="utf-8"))
+        for key, spec in groups.items():
+            spec["normalized_key"] = normalize(key)
+            spec["normalized_aliases"] = [normalize(a) for a in spec.get("aliases", [])]
+        return groups
     except FileNotFoundError:
         return {}
 
@@ -456,8 +460,8 @@ def _stations_search_impl(q: str, limit: int) -> dict:
     qn = normalize(q)
     groups = []
     for key, spec in _load_place_groups().items():
-        aliases = spec.get("aliases", [])
-        if qn and (qn == normalize(key) or any(qn in normalize(a) for a in aliases)):
+        normalized_aliases = spec.get("normalized_aliases", [])
+        if qn and (qn == spec.get("normalized_key", normalize(key)) or any(qn in a for a in normalized_aliases)):
             groups.append(
                 {
                     "kind": "place_group",
