@@ -553,6 +553,171 @@ def cards_list() -> dict:
 
 
 
+def _expand_stops(g, stops: list[int], radius_m: float, allow_other_cities: bool) -> list[int]:
+    """Étend les arrêts de départ/arrivée avec les arrêts proches (< 200m pôle multimodal,
+    ou dans le rayon spécifié au sein de la même ville/commune)."""
+    expanded = set(stops)
+    for idx in list(stops):
+        orig_name = g.stops[idx].name
+        for nearby_idx in g.stops_nearby(idx, radius_m):
+            nearby_name = g.stops[nearby_idx].name
+            # Toujours autoriser si < 200m (arrêt en face / pôle multimodal)
+            if approx_distance_km(
+                g.stops[idx].lat, g.stops[idx].lon,
+                g.stops[nearby_idx].lat, g.stops[nearby_idx].lon,
+            ) <= 0.2:
+                expanded.add(nearby_idx)
+            elif allow_other_cities or _is_same_city(orig_name, nearby_name):
+                expanded.add(nearby_idx)
+    return list(expanded)
+
+
+def _compute_bus_region_filter(g, origins: list[int], dests: list[int]) -> set[int] | None:
+    """Filtre géographique de proximité pour les modes bus/car : n'inclut que les
+    lignes ayant au moins un arrêt à < 5km de l'origine ou destination, plus extension 1-hop."""
+    search_stops = set(origins + dests)
+    latlons = [(g.stops[idx].lat, g.stops[idx].lon) for idx in search_stops]
+    relevant_routes: set[int] = set()
+    for stop_idx, route_ids in enumerate(g.routes_by_stop):
+        if not route_ids:
+            continue
+        s = g.stops[stop_idx]
+        for slat, slon in latlons:
+            dlat = s.lat - slat
+            dlon = s.lon - slon
+            if abs(dlat) < 0.05 and abs(dlon) < 0.075:
+                km = approx_distance_km(slat, slon, s.lat, s.lon)
+                if km < 5.0:
+                    relevant_routes.update(route_ids)
+                    break
+    if relevant_routes:
+        hop1: set[int] = set()
+        for stop_idx, route_ids in enumerate(g.routes_by_stop):
+            if route_ids and any(r in relevant_routes for r in route_ids):
+                hop1.update(route_ids)
+        relevant_routes.update(hop1)
+    return relevant_routes or None
+
+
+def _filter_dominated_journeys(journeys: list) -> list:
+    """Filtre de dominance Pareto : élimine les trajets dominés par un autre
+    (parti >= aussi tard, arrivé <= aussi tôt, avec <= correspondances)."""
+    if not journeys:
+        return []
+    journeys = sorted(journeys, key=lambda j: (-j.departure, j.arrival, j.transfers))
+    filtered: list = []
+    for j in journeys:
+        if not any(
+            d.departure >= j.departure
+            and d.arrival <= j.arrival
+            and d.transfers <= j.transfers
+            and (d.departure, d.arrival, d.transfers) != (j.departure, j.arrival, j.transfers)
+            for d in filtered
+        ):
+            filtered.append(j)
+    return filtered
+
+
+def _journey_alerts(alerts, j, g) -> list:
+    """Alertes pertinentes d'un trajet : gares des legs (marche exclue) et
+    numéros de train des legs ferroviaires."""
+    stop_idxs: list[int] = []
+    train_numbers: list[str] = []
+    for leg in j.legs:
+        if leg.type == "walk":
+            continue
+        idx = g.stop_index.get(leg.from_id)
+        if idx is not None:
+            stop_idxs.append(idx)
+        idx = g.stop_index.get(leg.to_id)
+        if idx is not None:
+            stop_idxs.append(idx)
+        m = gtfs_rt._TRAIN_NO_RE.match(leg.trip_id)
+        if m:
+            train_numbers.append(m.group(1) or m.group(2))
+    return alerts.relevant(stop_idxs, train_numbers)
+
+
+def _alert_json(a) -> dict:
+    return a.to_json()
+
+
+def _enrich_journey(
+    j,
+    d,
+    g,
+    card_ids: list[str],
+    rt_requested: bool,
+    realtime,
+    alerts_feed,
+    origin_ctx: dict | None,
+    dest_ctx: dict | None,
+    req_dest_ids: set,
+    dests_raw: list[int],
+    to: str,
+) -> dict:
+    """Enrichit un Journey calculé : prix estimés, découpage intra-train, correspondances
+    à risque, perturbations temps réel et notes contextuelles origine/destination."""
+    jd = _bare_journey(j.to_json(d))
+    # T12 — prix estimés (modèle v1, calibré sur prix observés)
+    price_info = _pricing.journey_price(j, cards=card_ids, date=d) if _pricing is not None else None
+    if price_info is not None:
+        jd["price_normal_eur"] = price_info.pop("price_normal_eur")
+        jd["price_reduced_eur"] = price_info.pop("price_reduced_eur")
+        jd["pricing"] = price_info
+        # §32 — découpage intra-train : ids nus, horodatage ISO et lien par segment
+        split = price_info.get("split")
+        if split:
+            for seg in split["segments"]:
+                seg["from"]["stop_area_id"] = _bare(seg["from"]["stop_area_id"])
+                seg["to"]["stop_area_id"] = _bare(seg["to"]["stop_area_id"])
+                seg["from"]["time"] = _iso_min(d, seg.pop("departure_min"))
+                seg["to"]["time"] = _iso_min(d, seg.pop("arrival_min"))
+    # T8 — correspondances à risque
+    if rt_requested:
+        jd["connection_risks"] = _connection_risks(jd) if realtime is not None else []
+    # T8 — perturbations du trajet (Service Alerts)
+    if alerts_feed is not None:
+        jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
+    # Notes de transparence : résolution géographique / groupe multi-gares
+    rail_legs = [l for l in j.legs if l.type != "walk"]
+    if origin_ctx and rail_legs:
+        idx = g.stop_index.get(rail_legs[0].from_id)
+        if idx is not None:
+            km = approx_distance_km(
+                origin_ctx["lat"], origin_ctx["lon"], g.stops[idx].lat, g.stops[idx].lon
+            )
+            jd["origin_note"] = (
+                f"Départ de {rail_legs[0].from_name} — {_fmt_km(km)} km de {origin_ctx['label']}"
+            )
+    if j.legs:
+        last_leg = j.legs[-1]
+        arr_idx = g.stop_index.get(last_leg.to_id)
+        if arr_idx is not None:
+            if dest_ctx is not None:
+                km = approx_distance_km(
+                    dest_ctx["lat"], dest_ctx["lon"], g.stops[arr_idx].lat, g.stops[arr_idx].lon
+                )
+                jd["destination_note"] = (
+                    f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {dest_ctx['label']}"
+                )
+            elif last_leg.to_id not in req_dest_ids:
+                jd["destination_note"] = f"Arrivée à {last_leg.to_name} (gare voisine)"
+            elif dests_raw and last_leg.to_id != g.stops[dests_raw[0]].id:
+                km = approx_distance_km(
+                    g.stops[dests_raw[0]].lat,
+                    g.stops[dests_raw[0]].lon,
+                    g.stops[arr_idx].lat,
+                    g.stops[arr_idx].lon,
+                )
+                if km > 2.0:
+                    to_label = to.removeprefix("place_group:")
+                    jd["destination_note"] = (
+                        f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {to_label}"
+                    )
+    return jd
+
+
 @app.post("/v1/journeys", tags=["itinéraires"])
 def journeys(
     request: Request,
@@ -642,27 +807,8 @@ def journeys(
     req_origin_ids = {g.stops[i].id for i in origins_raw}
     req_dest_ids = {g.stops[i].id for i in dests_raw}
 
-    # Expand origins with nearby stops (< 200m) so RAPTOR can board directly.
-    # For destinations: expand within 5km, but by default ONLY within the same
-    # city/commune (unless expand_nearby is True, which allows neighboring stations).
-    def _expand_stops(stops: list[int], radius_m: float, allow_other_cities: bool) -> list[int]:
-        expanded = set(stops)
-        for idx in list(stops):
-            orig_name = g.stops[idx].name
-            for nearby_idx in g.stops_nearby(idx, radius_m):
-                nearby_name = g.stops[nearby_idx].name
-                # Toujours autoriser si < 200m (arrêt en face / pôle multimodal)
-                if approx_distance_km(
-                    g.stops[idx].lat, g.stops[idx].lon,
-                    g.stops[nearby_idx].lat, g.stops[nearby_idx].lon,
-                ) <= 0.2:
-                    expanded.add(nearby_idx)
-                elif allow_other_cities or _is_same_city(orig_name, nearby_name):
-                    expanded.add(nearby_idx)
-        return list(expanded)
-
-    origins = _expand_stops(origins_raw, 200.0, allow_other_cities=False)
-    dests = _expand_stops(dests_raw, 5000.0, allow_other_cities=expand_nearby)
+    origins = _expand_stops(g, origins_raw, 200.0, allow_other_cities=False)
+    dests = _expand_stops(g, dests_raw, 5000.0, allow_other_cities=expand_nearby)
 
     # T8 — le moteur consomme un instantané du poller (graphe et temps réel
     # sont partagés en lecture seule via snapshot()). Instantané vide => pas
@@ -677,37 +823,7 @@ def journeys(
             realtime = rt_snap
 
     # Route proximity filter: only include routes with stops near origin/dest.
-    # Uses geographic distance (5km) + 1-hop expansion via shared stops.
-    region_filter = None
-    if vehicle in ("bus", "bus_train"):
-        # Collect all origin/dest coordinates
-        search_stops = set(origins + dests)
-        latlons = [(g.stops[idx].lat, g.stops[idx].lon) for idx in search_stops]
-        # Find routes with at least one stop within 5km of any origin/dest
-        relevant_routes: set[int] = set()
-        for stop_idx, route_ids in enumerate(g.routes_by_stop):
-            if not route_ids:
-                continue
-            s = g.stops[stop_idx]
-            for slat, slon in latlons:
-                dlat = s.lat - slat
-                dlon = s.lon - slon
-                if abs(dlat) < 0.05 and abs(dlon) < 0.075:
-                    km = approx_distance_km(slat, slon, s.lat, s.lon)
-                    if km < 5.0:
-                        relevant_routes.update(route_ids)
-                        break
-        # 1-hop expansion: add routes that share a stop with any filtered route.
-        # This captures intermediate routes (ex: C2 Nevers→Clermont connecting
-        # Paris to bus 283) without blowing up the filter.
-        if relevant_routes:
-            hop1: set[int] = set()
-            for stop_idx, route_ids in enumerate(g.routes_by_stop):
-                if route_ids and any(r in relevant_routes for r in route_ids):
-                    hop1.update(route_ids)
-            relevant_routes.update(hop1)
-        if relevant_routes:
-            region_filter = relevant_routes
+    region_filter = _compute_bus_region_filter(g, origins, dests) if vehicle in ("bus", "bus_train") else None
 
     def _run_raptor():
         if datetime_represents == "arrival":
@@ -723,21 +839,7 @@ def journeys(
         raise _error(503, "TIMEOUT", "Le calcul d'itinéraire a pris trop de temps. Réessayez avec des critères plus simples.")
 
     # Pareto dominance filter: remove journeys dominated by another.
-    # A is dominated by B when B departs >= as late AND arrives <= as early
-    # AND has <= transfers.  Keeps only non-dominated alternatives.
-    if journeys:
-        journeys.sort(key=lambda j: (-j.departure, j.arrival, j.transfers))
-        filtered: list = []
-        for j in journeys:
-            if not any(
-                d.departure >= j.departure
-                and d.arrival <= j.arrival
-                and d.transfers <= j.transfers
-                and (d.departure, d.arrival, d.transfers) != (j.departure, j.arrival, j.transfers)
-                for d in filtered
-            ):
-                filtered.append(j)
-        journeys = filtered
+    journeys = _filter_dominated_journeys(journeys)
 
     # Tri : §8.2 — par défaut le moins de correspondances d'abord (même trajet
     # plus long) ; sinon par départ ou par durée (« le plus court de la
@@ -751,118 +853,16 @@ def journeys(
     else:
         journeys = sorted(journeys, key=lambda j: (j.departure, j.arrival))[:count]
 
-    # T9 — liens Trainline PAR BILLET (PoC monétisation). Les billets TER se
-    # vendent séparément par segment : une URL de réservation est générée pour
-    # chaque leg ferroviaire (train/car/tram), avec sa propre date et heure de
-    # départ (les legs peuvent passer minuit). Les marches inter-gares n'ont
-    # pas de billet.
-    def _iso(leg):
-        """(date, heure) d'un leg à partir de son `from.time` ISO."""
-        t = (leg.get("from") or {}).get("time") or ""
-        return t[:10], (t[11:16] or None)
-
-    out = []
-    # T8 — alertes Service Alerts : pertinentes si une gare ou un train du trajet
-    # est touché. On expose au plus 3 (les alertes générales restent dans health).
     alerts_feed = _poller.alerts_snapshot() if (_poller is not None) else None
-    # T11 — cartes de réduction TER demandées (ids Trainline, validés).
     card_ids = trainline_cards.valid_ids([c for c in cards.split(",") if c])
-    for j in journeys:
-        jd = _bare_journey(j.to_json(d))
-        # T12 — prix estimés (modèle v1, calibré sur prix observés) : le prix
-        # n'est jamais nul et reste une ESTIMATION clairement signalée. Les
-        # cartes de réduction (param `cards`) réduisent `price_reduced_eur`.
-        price_info = _pricing.journey_price(j, cards=card_ids, date=d) if _pricing is not None else None
-        if price_info is not None:
-            jd["price_normal_eur"] = price_info.pop("price_normal_eur")
-            jd["price_reduced_eur"] = price_info.pop("price_reduced_eur")
-            jd["pricing"] = price_info
-            # §32 — découpage intra-train : ids nus, horodatage ISO et lien de
-            # réservation par segment (avec la meilleure carte de sa région).
-            split = price_info.get("split")
-            if split:
-                for seg in split["segments"]:
-                    seg["from"]["stop_area_id"] = _bare(seg["from"]["stop_area_id"])
-                    seg["to"]["stop_area_id"] = _bare(seg["to"]["stop_area_id"])
-                    seg["from"]["time"] = _iso_min(d, seg.pop("departure_min"))
-                    seg["to"]["time"] = _iso_min(d, seg.pop("arrival_min"))
-        # T8 — correspondances à risque (retard réel menaçant la jonction) ;
-        # clé présente (liste vide possible) dès que le RT est demandé
-        if rt_requested:
-            jd["connection_risks"] = _connection_risks(jd) if realtime is not None else []
-        # T8 — perturbations du trajet (Service Alerts).
-        if alerts_feed is not None:
-            jd["alerts"] = [_alert_json(a) for a in _journey_alerts(alerts_feed, j, g)[:3]]
-        # Notes de transparence : la résolution géographique (commune/GPS),
-        # l'extension « gares voisines » et les groupes multi-gares peuvent
-        # faire partir/arriver ailleurs que le lieu tapé. On l'affiche avec la
-        # distance réelle (corrigée cos(latitude)) plutôt que de deviner via
-        # un préfixe de nom (_is_same_city confondait « Saint-Jean-de-Luz » et
-        # « Saint-Jean-de-Bassel », ~900 km).
-        rail_legs = [l for l in j.legs if l.type != "walk"]
-        if origin_ctx and rail_legs:
-            idx = g.stop_index.get(rail_legs[0].from_id)
-            if idx is not None:
-                km = approx_distance_km(
-                    origin_ctx["lat"], origin_ctx["lon"], g.stops[idx].lat, g.stops[idx].lon
-                )
-                jd["origin_note"] = (
-                    f"Départ de {rail_legs[0].from_name} — {_fmt_km(km)} km de {origin_ctx['label']}"
-                )
-        if j.legs:
-            last_leg = j.legs[-1]
-            arr_idx = g.stop_index.get(last_leg.to_id)
-            if arr_idx is not None:
-                if dest_ctx is not None:
-                    km = approx_distance_km(
-                        dest_ctx["lat"], dest_ctx["lon"], g.stops[arr_idx].lat, g.stops[arr_idx].lon
-                    )
-                    jd["destination_note"] = (
-                        f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {dest_ctx['label']}"
-                    )
-                elif last_leg.to_id not in req_dest_ids:
-                    jd["destination_note"] = f"Arrivée à {last_leg.to_name} (gare voisine)"
-                elif dests_raw and last_leg.to_id != g.stops[dests_raw[0]].id:
-                    # Membre « secondaire » d'une résolution multi-gares
-                    # (ex. groupe besancon → F-C TGV à 8,4 km de Viotte).
-                    km = approx_distance_km(
-                        g.stops[dests_raw[0]].lat,
-                        g.stops[dests_raw[0]].lon,
-                        g.stops[arr_idx].lat,
-                        g.stops[arr_idx].lon,
-                    )
-                    if km > 2.0:
-                        to_label = to.removeprefix("place_group:")
-                        jd["destination_note"] = (
-                            f"Arrivée à {last_leg.to_name} — {_fmt_km(km)} km de {to_label}"
-                        )
-        out.append(jd)
-    resp = {"journeys": out}
-    return resp
-
-
-def _journey_alerts(alerts, j, g) -> list:
-    """Alertes pertinentes d'un trajet : gares des legs (marche exclue) et
-    numéros de train des legs ferroviaires."""
-    stop_idxs: list[int] = []
-    train_numbers: list[str] = []
-    for leg in j.legs:
-        if leg.type == "walk":
-            continue
-        idx = g.stop_index.get(leg.from_id)
-        if idx is not None:
-            stop_idxs.append(idx)
-        idx = g.stop_index.get(leg.to_id)
-        if idx is not None:
-            stop_idxs.append(idx)
-        m = gtfs_rt._TRAIN_NO_RE.match(leg.trip_id)
-        if m:
-            train_numbers.append(m.group(1) or m.group(2))
-    return alerts.relevant(stop_idxs, train_numbers)
-
-
-def _alert_json(a) -> dict:
-    return a.to_json()
+    out = [
+        _enrich_journey(
+            j, d, g, card_ids, rt_requested, realtime, alerts_feed,
+            origin_ctx, dest_ctx, req_dest_ids, dests_raw, to
+        )
+        for j in journeys
+    ]
+    return {"journeys": out}
 
 
 @app.get("/v1/trips/{trip_id:path}/schedule", tags=["horaires"])

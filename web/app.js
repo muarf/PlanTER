@@ -322,7 +322,7 @@ function cardLabel(c) {
 }
 
 function renderCardsPanel() {
-  cardPanel.innerHTML = "";
+  cardPanel.replaceChildren();
   cardsByRegion.forEach(([region, list]) => {
     const group = document.createElement("li");
     group.className = "cards-group";
